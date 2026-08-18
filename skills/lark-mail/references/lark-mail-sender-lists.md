@@ -13,6 +13,8 @@
 
 ## 查询
 
+`--page-size` 默认 20，允许范围是 1 到 100。
+
 ```bash
 # 查询信任发件人
 lark-cli mail +sender-allowlist --page-size 20
@@ -51,7 +53,7 @@ lark-cli mail +sender-blocklist-modify --remove spam@example.com,bad.example
 |------|---------------|------|
 | `--mailbox <id>` | 全部 | 用户邮箱 ID、邮箱地址或 `me`，默认 `me` |
 | `--query <keyword>` | `+sender-allowlist` / `+sender-blocklist` | 前缀搜索关键词 |
-| `--page-size <n>` | `+sender-allowlist` / `+sender-blocklist` | 分页大小，必须大于 0 |
+| `--page-size <n>` | `+sender-allowlist` / `+sender-blocklist` | 分页大小，范围 1 到 100 |
 | `--page-token <token>` | `+sender-allowlist` / `+sender-blocklist` | 下一页 token |
 | `--add <sender>` | `+sender-allowlist-modify` / `+sender-blocklist-modify` | 添加邮箱地址或域名 |
 | `--remove <sender>` | `+sender-allowlist-modify` / `+sender-blocklist-modify` | 删除邮箱地址或域名 |
