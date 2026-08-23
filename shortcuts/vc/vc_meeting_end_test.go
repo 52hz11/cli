@@ -275,7 +275,7 @@ func TestMeetingEndDryRunDoesNotResolveScopesOrCallAPI(t *testing.T) {
 func TestMeetingEndExecuteScopePreflightRunsBeforeAPI(t *testing.T) {
 	f, accountResolver, _, reg, stdout := newMeetingManagementFactoryWithCounters(t)
 	resolver := &meetingManagementCountingTokenResolver{
-		result: &credential.TokenResult{Token: "uat-test", Scopes: ""},
+		result: &credential.TokenResult{Token: "uat-test", Scopes: "vc:record:readonly"},
 	}
 	f.Credential = credential.NewCredentialProvider(nil, accountResolver, resolver, nil)
 	apiCalls := 0
