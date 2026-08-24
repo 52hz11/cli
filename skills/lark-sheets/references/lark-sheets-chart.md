@@ -149,6 +149,8 @@
 | `+chart-create-basic` | write | 对象 |
 | `+chart-config-update` | write | 对象 |
 | `+chart-data-update` | write | 对象 |
+| `+chart-create` | write | 对象 |
+| `+chart-update` | write | 对象 |
 | `+chart-delete` | high-risk-write | 对象 |
 
 ## Flags
@@ -250,6 +252,24 @@ _公共四件套 · 系统：`--dry-run`_
 | `--group-index` | int | optional | 仅气泡图：可选分组维度的 1-based 索引 |
 | `--size-index` | int | optional | 仅气泡图：可选气泡大小维度的 1-based 索引 |
 
+### `+chart-create`
+
+_公共四件套 · 系统：`--dry-run`_
+
+| Flag | Type | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `--properties` | string + File + Stdin（复合 JSON） | required | 图表完整配置 JSON。顶层字段为 `position` / `offset` / `size` / `snapshot`（无顶层 `data`，也无再嵌一层 `properties`）；图表数据配置在 `snapshot.data` 下（含 `refs` / `headerMode` / `dim1` / `dim2`）；必须至少含 `snapshot.data.dim1.serie.index` 或 `dim2.series[].index` 之一，否则 server 拒。结构嵌套深，完整结构跑 `--print-schema --flag-name properties` |
+| `--print-example` | string | optional | 打印指定图表类型的最小可用 `--properties` 模板后直接退出（`area` / `bar` / `bubble` / `column` / `combo` / `line` / `pareto` / `pie` / `radar` / `scatter` / `waterfall`）。纯本地执行，不需要 locator flag、不发网络请求；传入未知类型时列出全部可用类型 |
+
+### `+chart-update`
+
+_公共四件套 · 系统：`--dry-run`_
+
+| Flag | Type | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `--chart-id` | string | required | 目标图表 reference_id |
+| `--properties` | string + File + Stdin（复合 JSON） | required | 图表配置补丁 JSON；默认只传变化字段，未传字段保持不变；普通对象递归合并，数组整体替换 |
+
 ### `+chart-delete`
 
 _公共四件套 · 系统：`--yes`、`--dry-run`_
@@ -257,6 +277,21 @@ _公共四件套 · 系统：`--yes`、`--dry-run`_
 | Flag | Type | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `--chart-id` | string | required | 目标图表 reference_id |
+
+## Schemas
+
+> 复合 JSON flag 字段速查（只列顶层 + 一层嵌套）。深层结构看下方 `## Examples`，或用 `--print-schema` 读完整 JSON Schema（用法见 SKILL.md「公共 flag 速查」与「Agent 使用提示」）。
+
+### `+chart-create` `--properties` / `+chart-update` `--properties`
+
+_创建/更新的图表属性_
+
+**顶层字段**：
+- `position` (object?) — 必填 { row: number, col: string }
+- `offset` (object?) — 可选 { row_offset?: number, col_offset?: number }
+- `size` (object?) — 必填 { width: number, height: number }
+- `last_point_label` (boolean?) — update 使用
+- `snapshot` (oneOf?) — 图表快照配置
 
 ## Examples
 
