@@ -121,4 +121,10 @@ lark-cli docs +script --command init-draft --presentation-decision "@./<decision
 
 ### Step 8：清理并交付。
 
-完成创建后的 fetch 验证，或在失败时记录必要诊断后，只要 Step 4 已返回 `work_dir`，就使用当前运行时的文件删除能力精确删除 `task_cwd` 下的整个 `work_dir`；若 `decision_input_path` 仍存在也精确删除。不要使用通配符，也不要删除这些路径外的用户原始文件。最终只交付用户需要的结果，并说明必要来源、未关闭缺口、异常、失败或阻塞原因，以及文档 URL 或 token。
+完成创建后的 fetch 验证，或在失败时记录必要诊断后，只要 Step 4 已返回 `work_dir`，就在同一个 `task_cwd` 静默执行下列命令；不得改用 `rm`、`rmdir`、PowerShell 删除命令或运行时的通用文件删除能力，也不得询问用户是否清理：
+
+```bash
+lark-cli docs +script --command cleanup-draft --workspace "<work_dir>" --format json
+```
+
+该命令只接受 `init-draft` 返回的 `draft_<8位十六进制字符>_folder`，并在存在 CLI 基线标记时递归删除该工作区；不得传入其他目录。`decision_input_path` 若仍存在，使用当前运行时的文件编辑能力精确删除该单个任务输入文件。正常清理不属于交付内容，不在最终答复中告知用户；只有清理失败、遗留本地文件时才说明。最终只交付用户需要的结果，并说明必要来源、未关闭缺口、异常、失败或阻塞原因，以及文档 URL 或 token。

@@ -5,6 +5,7 @@
 | `--command` | 用途 |
 |-|-|
 | `init-draft` | 创建带 Presentation Decision 基线的独占工作区，并预留尚不存在的 XML 路径。 |
+| `cleanup-draft` | 静默递归删除由 `init-draft` 创建的单个草稿工作区。 |
 | `parse` | 解析本地或在线文档，返回画像并检查决策与资源。 |
 
 每个脚本只使用其小节列出的专用参数；所有脚本均可使用文末的通用参数。
@@ -39,7 +40,26 @@ lark-cli docs +script --command init-draft \
 - 决策必须是单个 JSON 对象，包含 `audience`、`reader_task`、`genre_contract`、`adapter`、`presentation_mode` 和 `visual_plan`。`presentation_mode` 取 `formal|normal|rich`；`genre_contract`、`adapter` 使用固定短名、`"none"` 或 `null`。
 - `visual_plan` 包含非空 `reason` 和 `blocks` 数组；每项为 `{type,min_count,purpose}`，`type` 不重复，`min_count` 为正整数。按本 Skill 创建文档时，`blocks` 只对 `whiteboard`、`img`、`html5-block` 设置最低数量，其他表达按内容需要使用但不设数量约束；三类均无需约束时写 `[]`。CLI 为外部决策兼容 `type: "list"`，检查时将 `<ul>` 与 `<ol>` 的数量相加。仅有字数要求时添加 `word_count: {min,max}`；未指定的一侧写 `null`，至少一侧为正整数，且 `min <= max`。
 - 返回 `data.workspace`（已创建的随机工作区）、`data.draft_path`（可直接写入的 XML 路径）和英文操作提示 `data.tip`。工作区及其中的 `.presentation-decision.json` 已存在，但 XML 尚不存在；遵循提示直接使用文件创建/写入能力在 `draft_path` 写入完整 XML，首次写入前不要读取该路径。
-- 后续始终使用 `draft_path`，不得另建 XML、复用其他任务的路径或修改工作区中的 `.presentation-decision.json`；使用完后精确删除 `workspace`。
+- 后续始终使用 `draft_path`，不得另建 XML、复用其他任务的路径或修改工作区中的 `.presentation-decision.json`；使用完后通过下方 `cleanup-draft` 精确删除 `workspace`。
+
+## `cleanup-draft`
+
+### 参数
+
+| 参数 | 必填 | 用法 |
+|-|-|-|
+| `--command cleanup-draft` | 是 | 选择本脚本。 |
+| `--workspace` | 是 | `init-draft` 返回的 `data.workspace` 原值。 |
+
+```bash
+lark-cli docs +script --command cleanup-draft \
+  --workspace "draft_a1b2c3d4_folder" \
+  --format json
+```
+
+- 只能传入当前 CWD 直属的 `draft_<8位十六进制字符>_folder`。目录存在时还必须包含 `init-draft` 写入的 `.presentation-decision.json` 基线标记；任何其他路径都会拒绝，不会触碰目录内容。
+- 命令递归删除该工作区内的 XML、图片、画板、HTML 等草稿资源，不调用 OpenAPI，不删除工作区之外的文件；重复清理已不存在的工作区会成功返回 `removed: false`。
+- 创建工作流收尾时静默执行；不要改用通用 shell 删除命令，不要询问用户是否清理，也不要在最终答复中报告成功的例行清理。只有命令失败并遗留本地文件时才告知用户。
 
 ## `parse`
 

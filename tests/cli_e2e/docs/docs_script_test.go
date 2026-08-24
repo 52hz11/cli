@@ -463,6 +463,85 @@ func TestDocsScriptInitDraftCreatesUniqueWorkspacesWithoutXML(t *testing.T) {
 	require.Len(t, seen, count)
 }
 
+func TestDocsScriptCleanupDraftRemovesInitializedWorkspace(t *testing.T) {
+	workDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	decision := `{"audience":"reader","reader_task":"understand the topic","genre_contract":"none","adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"plain text is sufficient","blocks":[]}}`
+	initialized, err := clie2e.RunCmd(ctx, clie2e.Request{
+		Args: []string{
+			"docs", "+script",
+			"--command", "init-draft",
+			"--presentation-decision", decision,
+		},
+		DefaultAs: "bot",
+		WorkDir:   workDir,
+		Env:       docsScriptE2EEnv(t),
+	})
+	require.NoError(t, err)
+	initialized.AssertExitCode(t, 0)
+	initialized.AssertStdoutStatus(t, true)
+	workspace := gjson.Get(initialized.Stdout, "data.workspace").String()
+	draftPath := gjson.Get(initialized.Stdout, "data.draft_path").String()
+	require.NotEmpty(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, draftPath), []byte(`<p>draft</p>`), 0o600))
+	assetPath := filepath.Join(workDir, workspace, "assets", "image.png")
+	require.NoError(t, os.MkdirAll(filepath.Dir(assetPath), 0o700))
+	require.NoError(t, os.WriteFile(assetPath, []byte("image"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "keep.txt"), []byte("keep"), 0o600))
+
+	cleaned, err := clie2e.RunCmd(ctx, clie2e.Request{
+		Args: []string{
+			"docs", "+script",
+			"--command", "cleanup-draft",
+			"--workspace", workspace,
+		},
+		DefaultAs: "bot",
+		WorkDir:   workDir,
+		Env:       docsScriptE2EEnv(t),
+	})
+	require.NoError(t, err)
+	cleaned.AssertExitCode(t, 0)
+	cleaned.AssertStdoutStatus(t, true)
+	require.Equal(t, workspace, gjson.Get(cleaned.Stdout, "data.workspace").String())
+	require.True(t, gjson.Get(cleaned.Stdout, "data.removed").Bool())
+	_, statErr := os.Stat(filepath.Join(workDir, workspace))
+	require.True(t, os.IsNotExist(statErr), "workspace still exists: %v", statErr)
+	_, statErr = os.Stat(filepath.Join(workDir, "keep.txt"))
+	require.NoError(t, statErr)
+}
+
+func TestDocsScriptCleanupDraftDryRunDoesNotRemove(t *testing.T) {
+	workDir := t.TempDir()
+	workspace := "draft_a1b2c3d4_folder"
+	require.NoError(t, os.Mkdir(filepath.Join(workDir, workspace), 0o700))
+	markerPath := filepath.Join(workDir, workspace, ".presentation-decision.json")
+	require.NoError(t, os.WriteFile(markerPath, []byte("{}"), 0o600))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+
+	result, err := clie2e.RunCmd(ctx, clie2e.Request{
+		Args: []string{
+			"docs", "+script",
+			"--command", "cleanup-draft",
+			"--workspace", workspace,
+			"--dry-run",
+		},
+		DefaultAs: "bot",
+		WorkDir:   workDir,
+		Env:       docsScriptE2EEnv(t),
+	})
+	require.NoError(t, err)
+	result.AssertExitCode(t, 0)
+	result.AssertStdoutStatus(t, true)
+	require.Equal(t, "cleanup-draft", gjson.Get(result.Stdout, "data.command").String())
+	require.Equal(t, workspace, gjson.Get(result.Stdout, "data.workspace").String())
+	require.True(t, gjson.Get(result.Stdout, "data.recursive").Bool())
+	require.False(t, gjson.Get(result.Stdout, "data.network").Bool())
+	_, statErr := os.Stat(markerPath)
+	require.NoError(t, statErr)
+}
+
 func TestDocsScriptDryRunIsLocal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
