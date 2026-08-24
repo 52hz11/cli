@@ -648,11 +648,48 @@ func batchResultCount(value interface{}) int {
 // report.
 func batchWarnings(runtime *common.RuntimeContext) []string {
 	var out []string
+	out = append(out, batchIgnoredLocatorNotes(runtime)...)
 	if batchNeedsDimInsertBeforeStyleWarning(runtime) {
 		out = append(out, dimInsertBeforeStyleWarning)
 	}
 	out = append(out, batchCollidingDimFreezeNotes(runtime)...)
 	return append(out, batchLegacyDimFreezeNotes(runtime)...)
+}
+
+// batchIgnoredLocatorNotes makes the translator's intentional locator rewrite
+// visible. Without this note, a caller can pass a different spreadsheet in a
+// sub-op and mistake the ignored value for the actual target.
+func batchIgnoredLocatorNotes(runtime *common.RuntimeContext) []string {
+	rawOps, err := parseBatchOperationsFlag(runtime)
+	if err != nil {
+		return nil // a malformed --operations is the translator's to report.
+	}
+	var notes []string
+	for i, raw := range rawOps {
+		op, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		input, _ := op["input"].(map[string]interface{})
+		if input == nil {
+			continue
+		}
+		var ignored []string
+		for userKey := range input {
+			if isReservedSubOpKey(userKey) {
+				ignored = append(ignored, userKey)
+			}
+		}
+		if len(ignored) == 0 {
+			continue
+		}
+		sort.Strings(ignored)
+		shortcut, _ := op["shortcut"].(string)
+		notes = append(notes, fmt.Sprintf(
+			"warning: operations[%d] (%s) ignored input locator keys %s; the top-level +batch-update --url/--spreadsheet-token locator is authoritative",
+			i, shortcut, strings.Join(ignored, ", ")))
+	}
+	return notes
 }
 
 // batchCollidingDimFreezeNotes reports +dim-freeze sub-ops that target the SAME

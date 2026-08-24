@@ -864,6 +864,34 @@ func TestBatchUpdate_CollidingDimFreezeWarns(t *testing.T) {
 	})
 }
 
+func TestBatchUpdate_IgnoredLocatorWarns(t *testing.T) {
+	t.Parallel()
+
+	warning := dryRunWarning(t, BatchUpdate, []string{
+		"--url", testURL,
+		"--operations", `[{
+		  "shortcut":"+cells-clear",
+		  "input":{
+		    "sheet_name":"S1",
+		    "range":"A1:B2",
+		    "spreadsheet-token":"shtOTHER",
+		    "excel_id":"shtIGNORED",
+		    "url":"https://example.invalid/sheets/shtWRONG"
+		  }
+		}]`,
+		"--yes",
+	})
+	for _, want := range []string{
+		"operations[0] (+cells-clear)",
+		"excel_id, spreadsheet-token, url",
+		"top-level +batch-update --url/--spreadsheet-token locator is authoritative",
+	} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("locator warning should contain %q, got %q", want, warning)
+		}
+	}
+}
+
 // TestBatchOpAliasCollidesWithTarget pins the message for a sub-op carrying
 // BOTH an intuitive alias and the flag it aliases. The key is recognized, so
 // reporting it as "unknown input key" (which it did, because keys are walked

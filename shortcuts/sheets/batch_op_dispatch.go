@@ -321,6 +321,16 @@ func sheetMoveBatchInput(fv flagView, token, sheetID, sheetName string) (map[str
 // repetition.
 var reservedSubOpKeys = []string{"excel_id", "spreadsheet_token", "url"}
 
+func isReservedSubOpKey(userKey string) bool {
+	normalized := strings.ReplaceAll(userKey, "-", "_")
+	for _, key := range reservedSubOpKeys {
+		if normalized == key {
+			return true
+		}
+	}
+	return false
+}
+
 // wrappedSubOpInputKeys are nested MCP-body container keys that must never
 // appear at a sub-op input's top level — their presence means the caller
 // pasted a shortcut's structured *output* (e.g. a {"cell_styles":{…}} block)
@@ -582,12 +592,8 @@ func translateBatchOpWithDispatch(
 	// locator is authoritative, so these fields are harmlessly redundant and
 	// must never override it. Hyphen and underscore spellings both match.
 	for userKey := range input {
-		normalized := strings.ReplaceAll(userKey, "-", "_")
-		for _, k := range reservedSubOpKeys {
-			if normalized == k {
-				delete(input, userKey)
-				break
-			}
+		if isReservedSubOpKey(userKey) {
+			delete(input, userKey)
 		}
 	}
 	// Reject a "wrapped structure" sub-op input: agents copy a shortcut's nested
