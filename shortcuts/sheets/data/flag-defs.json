@@ -3574,7 +3574,7 @@
         "kind": "own",
         "type": "string",
         "required": "optional",
-        "desc": "Comma-separated 1-based value/Y-axis dimension indexes; must exclude dim1, at most 50. Legacy bubble calls accept 2–4 indexes in x,y[,group][,size] order; new calls should use role-specific indexes. Pie and pareto charts accept exactly one"
+        "desc": "Comma-separated 1-based value/Y-axis dimension indexes; must exclude dim1, at most 50. Legacy bubble calls accept 2–4 indexes in `x,y[,group][,size]` order; new calls should use role-specific indexes. Pie and pareto charts accept exactly one"
       },
       {
         "name": "series-types",

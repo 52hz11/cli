@@ -449,7 +449,8 @@ def main() -> None:
             run_sheets("+workbook-info", **locator, timeout=args.timeout)
         )
         sheets = resolve_target_sheets(workbook_data, sheet_id=args.worksheet_id)
-        sheets = [sheet for sheet in sheets if not bool(sheet.get("is_hidden"))]
+        if not args.worksheet_id:
+            sheets = [sheet for sheet in sheets if not bool(sheet.get("is_hidden"))]
         if not sheets:
             raise LarkCliError("No visible worksheet matched")
         results = [

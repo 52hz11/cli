@@ -515,6 +515,33 @@ func TestShortcuts_IntuitiveFlagAliases(t *testing.T) {
 	})
 }
 
+func TestMapFlagView_AliasResolutionIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("multiple aliases use stable lexical precedence", func(t *testing.T) {
+		t.Parallel()
+		fv := newMapFlagViewForCommand("+sheet-rename", map[string]interface{}{
+			"name":     "first",
+			"new-name": "second",
+		})
+		for range 100 {
+			if got := fv.Str("title"); got != "first" {
+				t.Fatalf("title = %q, want stable alias value %q", got, "first")
+			}
+		}
+	})
+
+	t.Run("underscored canonical name resolves alias", func(t *testing.T) {
+		t.Parallel()
+		fv := newMapFlagViewForCommand("+chart-config-update", map[string]interface{}{
+			"x-axis": "Month",
+		})
+		if got := fv.Str("x_axis_title"); got != "Month" {
+			t.Fatalf("x_axis_title = %q, want %q", got, "Month")
+		}
+	})
+}
+
 // TestShortcuts_IntuitiveFlagHints verifies the prescription tier: habitual
 // names whose fix is not a rename answer with the exact correct form, so the
 // retry needs no --help round trip (eval: +sheet-copy burned 3/3 post-error

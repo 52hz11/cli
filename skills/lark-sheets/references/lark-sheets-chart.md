@@ -16,7 +16,7 @@
 | 修正已有图表的数据范围或方向 | `+chart-data-update` | CLI 读取当前快照并只回写 data patch，保留其它配置 |
 | 批量创建多个独立图表 | `+batch-chart-create` | 保留成功图表，并逐项返回失败原因；只重试失败项 |
 | 批量更新多个独立图表 | `+batch-chart-update` | 逐图读取当前快照并生成 partial properties |
-| 高级创建/更新、删除图表 | `+chart-{create|update|delete}` | 按系列/数据点精细设置等高级需求才使用原始 properties；更新只提交必要的局部 properties |
+| 高级创建/更新、删除图表 | `+chart-{create\|update\|delete}` | 按系列/数据点精细设置等高级需求才使用原始 properties；更新只提交必要的局部 properties |
 
 ## 统一决策顺序
 
@@ -179,7 +179,7 @@ _公共四件套 · 系统：`--dry-run`_
 | `--y-axis-min` | float64 | optional | 左 Y 轴的显示范围下界；必须小于 --y-axis-max |
 | `--y-axis-max` | float64 | optional | 左 Y 轴的显示范围上界；必须大于 --y-axis-min |
 | `--dim1-index` | int | optional | 类别/X 轴维度在数据范围中的 1-based 索引；默认 1 |
-| `--dim2-indexes` | string | optional | 值/Y 轴系列的 1-based 索引列表，逗号分隔；不能包含 dim1，最多 50 个。气泡图旧调用按 x,y[,group][,size] 顺序传 2–4 个，新调用优先使用角色索引；饼图和排列图只传 1 个 |
+| `--dim2-indexes` | string | optional | 值/Y 轴系列的 1-based 索引列表，逗号分隔；不能包含 dim1，最多 50 个。气泡图旧调用按 `x,y[,group][,size]` 顺序传 2–4 个，新调用优先使用角色索引；饼图和排列图只传 1 个 |
 | `--series-types` | string | optional | 仅组合图；按 --dim2-indexes 顺序指定系列类型，逗号分隔，可选 column、line、area，数量必须与数值系列一致 |
 | `--series-y-axes` | string | optional | 仅组合图；按 --dim2-indexes 顺序指定系列使用 left 或 right Y 轴，逗号分隔，数量必须与数值系列一致 |
 | `--key-index` | int | optional | 仅气泡图：标识/名称维度的 1-based 索引；与 dim1/dim2 索引互斥，默认 1 |
