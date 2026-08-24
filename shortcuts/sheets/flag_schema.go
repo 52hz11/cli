@@ -60,19 +60,63 @@ func loadFlagSchemas() (*flagSchemaIndex, error) {
 		if idx.Flags == nil {
 			idx.Flags = map[string]map[string]json.RawMessage{}
 		}
-		if entry := idx.Flags["+chart-update"]; entry != nil {
+		for _, command := range []string{"+chart-create", "+chart-update"} {
+			entry := idx.Flags[command]
+			if entry == nil {
+				continue
+			}
 			if raw := entry["properties"]; raw != nil {
-				partial, err := recursivePartialJSONSchema(raw)
+				materialized, err := materializeChartSnapshotSchema(raw)
 				if err != nil {
-					parseFlagErr = errs.NewInternalError(errs.SubtypeUnknown, "derive +chart-update --properties schema: %v", err).WithCause(err)
+					parseFlagErr = errs.NewInternalError(errs.SubtypeUnknown, "materialize %s --properties schema: %v", command, err).WithCause(err)
 					return
 				}
-				entry["properties"] = partial
+				if command == "+chart-update" {
+					materialized, err = recursivePartialJSONSchema(materialized)
+					if err != nil {
+						parseFlagErr = errs.NewInternalError(errs.SubtypeUnknown, "derive +chart-update --properties schema: %v", err).WithCause(err)
+						return
+					}
+				}
+				entry["properties"] = materialized
 			}
 		}
 		parsedFlagSchemas = &idx
 	})
 	return parsedFlagSchemas, parseFlagErr
+}
+
+// materializeChartSnapshotSchema unwraps the canonical snapshot union into
+// its structured branch. The other union branch documents that chart-update
+// accepts a partial snapshot, but leaving it in the runtime schema would also
+// permit invalid values. The snapshot root remains optional-field compatible
+// with the previous generated schema, while nested create constraints remain
+// strict; chart-update becomes recursively partial below.
+func materializeChartSnapshotSchema(raw json.RawMessage) (json.RawMessage, error) {
+	var schema map[string]interface{}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	properties, _ := schema["properties"].(map[string]interface{})
+	snapshot, _ := properties["snapshot"].(map[string]interface{})
+	branches, _ := snapshot["anyOf"].([]interface{})
+	for _, branch := range branches {
+		full, ok := branch.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		fullProperties, ok := full["properties"].(map[string]interface{})
+		if !ok || len(fullProperties) == 0 {
+			continue
+		}
+		if description, ok := snapshot["description"]; ok {
+			full["description"] = description
+		}
+		delete(full, "required")
+		properties["snapshot"] = full
+		break
+	}
+	return json.Marshal(schema)
 }
 
 // recursivePartialJSONSchema derives an update schema from a full object
