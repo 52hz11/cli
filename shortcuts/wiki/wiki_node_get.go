@@ -391,9 +391,11 @@ func wikiNodeGetOutput(node *wikiNodeRecord, raw map[string]interface{}) map[str
 // client-side deep-link contract, gated behind LARKSUITE_CLI_CITATION (off by
 // default) and surfaced only in the top-level citations array, never in
 // `data`. So the two decisions coexist: `data` still emits no url; citations
-// may carry an applink url. An empty nodeToken yields an empty URL and the
-// framework drops the entry (citation.Normalize).
-func wikiNodeCitation(brand core.LarkBrand, spaceID, nodeToken, title, objEditTime string) []citation.Citation {
+// may carry an applink url. ResourceID is the node token alone because the
+// citation protocol identifies the referenced object, not its containing
+// space. An empty nodeToken yields an empty URL and the framework drops the
+// entry (citation.Normalize).
+func wikiNodeCitation(brand core.LarkBrand, nodeToken, title, objEditTime string) []citation.Citation {
 	entry := citation.Citation{
 		SourceType:  citation.SourceWiki,
 		Title:       title,
@@ -401,9 +403,7 @@ func wikiNodeCitation(brand core.LarkBrand, spaceID, nodeToken, title, objEditTi
 	}
 	if nodeToken != "" {
 		entry.URL = core.ResolveEndpoints(brand).AppLink + "/client/wiki/open?wikiToken=" + url.QueryEscape(nodeToken)
-		if spaceID != "" {
-			entry.ResourceID = spaceID + "/" + nodeToken
-		}
+		entry.ResourceID = nodeToken
 	}
 	return []citation.Citation{entry}
 }
@@ -419,11 +419,10 @@ func wikiNodeGetCitations(rt *common.RuntimeContext, data any) []citation.Citati
 	if rt != nil && rt.Config != nil {
 		brand = rt.Config.Brand
 	}
-	spaceID, _ := out["space_id"].(string)
 	nodeToken, _ := out["node_token"].(string)
 	title, _ := out["title"].(string)
 	objEditTime, _ := out["obj_edit_time"].(string)
-	return wikiNodeCitation(brand, spaceID, nodeToken, title, objEditTime)
+	return wikiNodeCitation(brand, nodeToken, title, objEditTime)
 }
 
 // formatWikiTimestamp turns a Lark unix-seconds string (the format used by

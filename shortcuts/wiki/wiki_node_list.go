@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/larksuite/cli/errs"
+	"github.com/larksuite/cli/internal/citation"
+	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/validate"
 	"github.com/larksuite/cli/shortcuts/common"
@@ -120,6 +122,10 @@ var WikiNodeList = common.Shortcut{
 			renderWikiNodesPretty(w, nodes, hasMore, nextToken)
 		})
 		return nil
+	},
+	Citation: &common.CitationDefinition{
+		SourceTypes: []citation.SourceType{citation.SourceWiki},
+		Build:       wikiNodeListCitations,
 	},
 }
 
@@ -300,6 +306,35 @@ func wikiNodeListItem(m map[string]interface{}) map[string]interface{} {
 		"title":             common.GetString(m, "title"),
 		"has_child":         common.GetBool(m, "has_child"),
 	}
+}
+
+// wikiNodeListCitations builds one citation per node in the final output
+// payload. It deliberately reads the projected nodes rather than the raw API
+// response, so citations cover exactly what the command returned to the model.
+func wikiNodeListCitations(rt *common.RuntimeContext, data any) []citation.Citation {
+	out, ok := data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	nodes, ok := out["nodes"].([]map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	brand := core.BrandFeishu
+	if rt != nil && rt.Config != nil {
+		brand = rt.Config.Brand
+	}
+	items := make([]citation.Citation, 0, len(nodes))
+	for _, node := range nodes {
+		items = append(items, wikiNodeCitation(
+			brand,
+			common.GetString(node, "node_token"),
+			common.GetString(node, "title"),
+			"",
+		)...)
+	}
+	return items
 }
 
 func renderWikiNodesPretty(w io.Writer, nodes []map[string]interface{}, hasMore bool, pageToken string) {
