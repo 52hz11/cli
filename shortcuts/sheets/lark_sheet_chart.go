@@ -1700,8 +1700,8 @@ func validateChartColorFlags(rt flagView) error {
 	}
 	if rt.Changed("colors") {
 		colors := normalizedChartColors(rt)
-		if len(colors) == 0 {
-			return sheetsValidationForFlag("colors", "--colors must contain at least one hex color")
+		if len(colors) < 2 {
+			return sheetsValidationForFlag("colors", "--colors must contain at least two hex colors")
 		}
 		for _, color := range colors {
 			if !chartHexColorPattern.MatchString(color) {
@@ -1717,9 +1717,6 @@ func normalizedChartColors(rt flagView) []string {
 	colors := make([]string, len(raw))
 	for i := range raw {
 		colors[i] = strings.TrimSpace(raw[i])
-	}
-	if len(colors) == 1 {
-		colors = append(colors, colors[0])
 	}
 	return colors
 }

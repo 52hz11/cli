@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/larksuite/cli/shortcuts/common"
 )
 
 func chartDryRunSnapshot(t *testing.T, input map[string]interface{}) map[string]interface{} {
@@ -616,34 +618,51 @@ func TestChartSemanticShortcuts_CompatibleAliasesInBatch(t *testing.T) {
 	}
 }
 
-func TestChartSemanticShortcuts_SingleCustomColorIsExpanded(t *testing.T) {
+func TestChartSemanticShortcuts_RejectsSingleCustomColor(t *testing.T) {
 	t.Parallel()
 
-	body := parseDryRunBody(t, ChartCreateBasic, []string{
-		"--url", testURL,
-		"--sheet-id", testSheetID,
-		"--chart-type", "line",
-		"--data-range", "A1:C10",
-		"--colors", "#112233",
-	})
-	basic := decodeToolInput(t, body, "manage_chart_object")["basic_chart"].(map[string]interface{})
-	colors := basic["colors"].([]interface{})
-	if len(colors) != 2 || colors[0] != "#112233" || colors[1] != "#112233" {
-		t.Fatalf("standalone colors = %#v", colors)
+	tests := []struct {
+		name     string
+		shortcut common.Shortcut
+		args     []string
+	}{
+		{
+			name:     "standalone create",
+			shortcut: ChartCreateBasic,
+			args: []string{
+				"--url", testURL,
+				"--sheet-id", testSheetID,
+				"--chart-type", "line",
+				"--data-range", "A1:C10",
+				"--colors", "#112233",
+			},
+		},
+		{
+			name:     "standalone config update",
+			shortcut: ChartConfigUpdate,
+			args: []string{
+				"--url", testURL,
+				"--sheet-id", testSheetID,
+				"--chart-id", "chart-1",
+				"--colors", "#223344",
+			},
+		},
+		{
+			name:     "batch create",
+			shortcut: BatchChartCreate,
+			args: []string{
+				"--url", testURL,
+				"--operations", `[{"sheet_id":"sh1","type":"line","range":"A1:C10","colors":["#445566"]}]`,
+			},
+		},
 	}
 
-	body = parseDryRunBody(t, BatchChartCreate, []string{
-		"--url", testURL,
-		"--operations", `[{
-			"sheet_id":"sh1","type":"line","range":"A1:C10","colors":["#445566"]
-		}]`,
-	})
-	input := decodeToolInput(t, body, "batch_update")
-	ops := input["operations"].([]interface{})
-	basic = ops[0].(map[string]interface{})["input"].(map[string]interface{})["basic_chart"].(map[string]interface{})
-	colors = basic["colors"].([]interface{})
-	if len(colors) != 2 || colors[0] != "#445566" || colors[1] != "#445566" {
-		t.Fatalf("batch array colors = %#v", colors)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := runShortcutCapturingErr(t, tt.shortcut, tt.args)
+			requireValidation(t, err, "at least two hex colors")
+		})
 	}
 }
 
