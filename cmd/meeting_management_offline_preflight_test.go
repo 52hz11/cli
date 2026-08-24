@@ -373,10 +373,10 @@ func TestOfflineMeetingManagementTerminalPathsSkipFullStartup(t *testing.T) {
 		{name: "end dry run rejects unresolved omitted identity", args: []string{"vc", "+meeting-end", "--meeting-id", "1", "--dry-run"}, wantCode: 2, wantOutput: "requires explicit --as user or --as bot", wantType: errs.CategoryValidation, wantSubtype: errs.SubtypeInvalidArgument, wantParam: "--as"},
 		{name: "end dry run rejects unresolved auto identity", args: []string{"vc", "+meeting-end", "--meeting-id", "1", "--dry-run", "--as", "auto"}, wantCode: 2, wantOutput: "requires explicit --as user or --as bot", wantType: errs.CategoryValidation, wantSubtype: errs.SubtypeInvalidArgument, wantParam: "--as"},
 		{name: "end confirmation", args: []string{"vc", "+meeting-end", "--meeting-id", "1"}, wantCode: 10, wantOutput: "confirmation", wantType: errs.CategoryConfirmation, wantSubtype: errs.SubtypeConfirmationRequired},
-		{name: "kickout invalid identity", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", "2=1", "--as", "bot"}, wantCode: 2, wantOutput: "only supports: user"},
-		{name: "kickout validation", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", " 2=1"}, wantCode: 2, wantOutput: "surrounding whitespace"},
+		{name: "kickout invalid identity", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", "2=1", "--as", "bot"}, wantCode: 2, wantOutput: "only supports: user", wantType: errs.CategoryValidation, wantSubtype: errs.SubtypeInvalidArgument, wantParam: "--as"},
+		{name: "kickout validation", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", " 2=1"}, wantCode: 2, wantOutput: "surrounding whitespace", wantType: errs.CategoryValidation, wantSubtype: errs.SubtypeInvalidArgument, wantParam: "--participant"},
 		{name: "kickout dry run", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", "2=1", "--dry-run", "--as", "user"}, wantCode: 0, wantOutput: "kickout_users"},
-		{name: "kickout confirmation", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", "2=1"}, wantCode: 10, wantOutput: "confirmation"},
+		{name: "kickout confirmation", args: []string{"vc", "+meeting-participant-kickout", "--meeting-id", "1", "--participant", "2=1"}, wantCode: 10, wantOutput: "confirmation", wantType: errs.CategoryConfirmation, wantSubtype: errs.SubtypeConfirmationRequired},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -391,6 +391,7 @@ func TestOfflineMeetingManagementTerminalPathsSkipFullStartup(t *testing.T) {
 				return
 			}
 			var envelope struct {
+				OK    bool `json:"ok"`
 				Error struct {
 					Type    errs.Category `json:"type"`
 					Subtype errs.Subtype  `json:"subtype"`
@@ -400,11 +401,22 @@ func TestOfflineMeetingManagementTerminalPathsSkipFullStartup(t *testing.T) {
 			if err := json.Unmarshal([]byte(stderr), &envelope); err != nil {
 				t.Fatalf("stderr is not a typed JSON envelope: %v; stderr=%s", err, stderr)
 			}
-			if envelope.Error.Type != test.wantType || envelope.Error.Subtype != test.wantSubtype {
-				t.Fatalf("typed error = %s/%s, want %s/%s", envelope.Error.Type, envelope.Error.Subtype, test.wantType, test.wantSubtype)
+			if envelope.OK {
+				t.Errorf("envelope ok = true, want false")
 			}
-			if test.wantParam != "" && (envelope.Error.Param == nil || *envelope.Error.Param != test.wantParam) {
-				t.Fatalf("error.param = %v, want %q", envelope.Error.Param, test.wantParam)
+			if envelope.Error.Type != test.wantType || envelope.Error.Subtype != test.wantSubtype {
+				t.Errorf("typed error = %s/%s, want %s/%s; stderr=%s", envelope.Error.Type, envelope.Error.Subtype, test.wantType, test.wantSubtype, stderr)
+			}
+			if test.wantParam == "" {
+				if envelope.Error.Param != nil {
+					t.Errorf("error.param = %q, want field omitted", *envelope.Error.Param)
+				}
+			} else if envelope.Error.Param == nil || *envelope.Error.Param != test.wantParam {
+				got := "<omitted>"
+				if envelope.Error.Param != nil {
+					got = *envelope.Error.Param
+				}
+				t.Errorf("error.param = %q, want %q", got, test.wantParam)
 			}
 		})
 	}
@@ -432,6 +444,7 @@ func TestOfflineMeetingManagementYesContinuesToFullStartup(t *testing.T) {
 
 func TestExecuteWithConcealmentFallsBackToFullStartup(t *testing.T) {
 	useCleanOfflineMeetingManagementEligibility(t)
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 
 	originalSingleApp := singleAppModeForInvocation
 	originalBrand := resolveStartupBrandForInvocation
@@ -447,6 +460,7 @@ func TestExecuteWithConcealmentFallsBackToFullStartup(t *testing.T) {
 	singleAppModeForInvocation = func() bool { return false }
 	resolveStartupBrandForInvocation = func(string) core.LarkBrand { return core.BrandLark }
 	fullStartupCalled := false
+	config := &core.CliConfig{Brand: core.BrandLark}
 	buildFullInvocation = func(_ context.Context, inv cmdutil.InvocationContext, cfg *buildConfig) (*buildRuntime, *cobra.Command, *hook.Registry) {
 		fullStartupCalled = true
 		if !cfg.presentation.enabled {
@@ -460,8 +474,11 @@ func TestExecuteWithConcealmentFallsBackToFullStartup(t *testing.T) {
 		root.SetIn(cfg.streams.In)
 		root.SetOut(cfg.streams.Out)
 		root.SetErr(cfg.streams.ErrOut)
+		factory, _, _, _ := cmdutil.TestFactory(t, config)
+		factory.IOStreams = cfg.streams
+		factory.Invocation = inv
 		return &buildRuntime{
-			Factory: &cmdutil.Factory{IOStreams: cfg.streams, Invocation: inv},
+			Factory: factory,
 			surface: surface.NewPlan(map[surface.CommandID]surface.CommandState{
 				surface.CommandUpdate: surface.CommandConcealed,
 			}),
