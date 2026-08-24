@@ -3790,7 +3790,7 @@
         "kind": "own",
         "type": "string_slice",
         "required": "optional",
-        "desc": "Custom chart-level series colors as a comma-separated list of at least one hex color; one color applies to every series; mutually exclusive with --color-palette"
+        "desc": "Custom chart-level series colors as a comma-separated list of at least two hex colors; mutually exclusive with --color-palette"
       },
       {
         "name": "anchor-cell",
@@ -4060,7 +4060,7 @@
         "kind": "own",
         "type": "string_slice",
         "required": "optional",
-        "desc": "Custom chart-level series colors as a comma-separated list of at least one hex color; one color applies to every series; mutually exclusive with --color-palette"
+        "desc": "Custom chart-level series colors as a comma-separated list of at least two hex colors; mutually exclusive with --color-palette"
       },
       {
         "name": "dry-run",

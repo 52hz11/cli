@@ -1718,5 +1718,8 @@ func normalizedChartColors(rt flagView) []string {
 	for i := range raw {
 		colors[i] = strings.TrimSpace(raw[i])
 	}
+	if len(colors) == 1 {
+		colors = append(colors, colors[0])
+	}
 	return colors
 }
