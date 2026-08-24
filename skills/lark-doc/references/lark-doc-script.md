@@ -17,11 +17,11 @@
 | 参数 | 必填 | 用法 |
 |-|-|-|
 | `--command init-draft` | 是 | 选择本脚本。 |
-| `--presentation-decision` | 是 | 完整决策 JSON；Agent 默认使用 UTF-8 `@./decision.json` 形式的 CWD 下相对路径；也接受内联 JSON 或 `-`（stdin）。 |
+| `--presentation-decision` | 是 | 完整决策 JSON；接受内联 JSON、`@./decision.json` 形式的 CWD 下相对路径或 `-`（stdin）。 |
 
 ```bash
 lark-cli docs +script --command init-draft \
-  --presentation-decision "@./presentation-decision.json" \
+  --presentation-decision '<完整 Presentation Decision JSON>' \
   --format json
 ```
 
@@ -35,8 +35,7 @@ lark-cli docs +script --command init-draft \
 }
 ```
 
-- 在生成正文前执行；不要自行创建 CLI 管理的 `draft_*` 工作目录、`.presentation-decision.json` 基线或 `draft.xml`。Agent 可按创建工作流在任务 CWD 写任务独占的 UTF-8 决策输入文件，再由 `init-draft` 保存基线。CLI 固定生成 `draft_<8位十六进制字符>_folder/draft.xml`，以返回的实际路径为准。
-- Agent 调用时，先把命令执行工具的 CWD 固定为文件工具的共享工作区，并把决策写成该目录下的 UTF-8 相对 `@file`。后续 parse/create 继续使用完全相同的 CWD；Windows 下禁止通过 PowerShell 文本管道传递决策或正文。
+- 在生成正文前执行；不要自行创建工作目录或决策文件。CLI 固定生成 `draft_<8位十六进制字符>_folder/draft.xml`，以返回的实际路径为准。
 - 决策必须是单个 JSON 对象，包含 `audience`、`reader_task`、`genre_contract`、`adapter`、`presentation_mode` 和 `visual_plan`。`presentation_mode` 取 `formal|normal|rich`；`genre_contract`、`adapter` 使用固定短名、`"none"` 或 `null`。
 - `visual_plan` 包含非空 `reason` 和 `blocks` 数组；每项为 `{type,min_count,purpose}`，`type` 不重复，`min_count` 为正整数。按本 Skill 创建文档时，`blocks` 只对 `whiteboard`、`img`、`html5-block` 设置最低数量，其他表达按内容需要使用但不设数量约束；三类均无需约束时写 `[]`。CLI 为外部决策兼容 `type: "list"`，检查时将 `<ul>` 与 `<ol>` 的数量相加。仅有字数要求时添加 `word_count: {min,max}`；未指定的一侧写 `null`，至少一侧为正整数，且 `min <= max`。
 - 返回 `data.workspace`（已创建的随机工作区）、`data.draft_path`（可直接写入的 XML 路径）和英文操作提示 `data.tip`。工作区及其中的 `.presentation-decision.json` 已存在，但 XML 尚不存在；遵循提示直接使用文件创建/写入能力在 `draft_path` 写入完整 XML，首次写入前不要读取该路径。
@@ -44,22 +43,14 @@ lark-cli docs +script --command init-draft \
 
 ## `cleanup-draft`
 
-### 参数
-
-| 参数 | 必填 | 用法 |
-|-|-|-|
-| `--command cleanup-draft` | 是 | 选择本脚本。 |
-| `--workspace` | 是 | `init-draft` 返回的 `data.workspace` 原值。 |
-
 ```bash
 lark-cli docs +script --command cleanup-draft \
   --workspace "draft_a1b2c3d4_folder" \
   --format json
 ```
 
-- 只能传入当前 CWD 直属的 `draft_<8位十六进制字符>_folder`。目录存在时还必须包含 `init-draft` 写入的 `.presentation-decision.json` 基线标记；任何其他路径都会拒绝，不会触碰目录内容。
-- 命令递归删除该工作区内的 XML、图片、画板、HTML 等草稿资源，不调用 OpenAPI，不删除工作区之外的文件；重复清理已不存在的工作区会成功返回 `removed: false`。
-- 创建工作流收尾时静默执行；不要改用通用 shell 删除命令，不要询问用户是否清理，也不要在最终答复中报告成功的例行清理。只有命令失败并遗留本地文件时才告知用户。
+- `--workspace` 原样使用 `init-draft` 返回值；命令只删除当前 CWD 直属、名称匹配且包含基线标记的草稿目录，重复清理返回 `removed: false`。
+- 创建工作流收尾时静默执行；不要改用通用删除命令或询问用户，只有清理失败并遗留本地文件时才告知用户。
 
 ## `parse`
 
@@ -68,7 +59,7 @@ lark-cli docs +script --command cleanup-draft \
 | 参数 | 必填 | 用法 |
 |-|-|-|
 | `--command parse` | 是 | 选择本脚本。 |
-| `--content` | 二选一 | 本地 XML 的字面内容、UTF-8 `@./document.xml` 形式的 CWD 下相对路径或 `-`（stdin）；Agent 默认使用 `@file`。 |
+| `--content` | 二选一 | 本地 XML 的字面内容、`@./document.xml` 形式的 CWD 下相对路径或 `-`（stdin）。 |
 | `--doc` | 二选一 | 在线 Docx/Wiki URL 或 token；与 `--content` 互斥。 |
 | `--presentation-decision` | 否 | 用于检查当前输入的完整决策 JSON；支持内联、`@./decision.json` 形式的 CWD 下相对路径或 `-`。 |
 
@@ -79,7 +70,6 @@ lark-cli docs +script --command parse --content "@./document.xml" --presentation
 ```
 
 - `--content` 与 `--presentation-decision` 同时使用时，最多一个参数读取 stdin。
-- Agent 不使用 stdin 传本地 XML 或决策；路径失败时修正命令执行 CWD。stdin 仅供能够直接提供原始 UTF-8 字节的宿主调用方使用。
 - 决策必须包含 `audience`、`reader_task`、`genre_contract`、`adapter`、`presentation_mode` 和 `visual_plan`；`presentation_mode` 取 `formal|normal|rich`。`visual_plan` 包含非空 `reason` 和不重复的 `{type,min_count,purpose}` 数组；兼容的 `list` 约束按 `<ul>` 与 `<ol>` 的合计数量检查。仅有字数要求时添加合法的 `word_count: {min,max}`。
 - 使用 `--content "@./<init-draft 返回的 data.draft_path>"` 时自动加载保存的决策；显式 `--presentation-decision` 优先。
 - `--doc` 需要 `docx:document:readonly`；`--content` 不调用 OpenAPI。
