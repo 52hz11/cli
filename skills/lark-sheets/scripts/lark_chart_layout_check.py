@@ -379,7 +379,7 @@ def check_sheet(
                 }
             )
 
-    issue_count = len(overlaps) + len(out_of_bounds) + len(content_overlaps) + len(unverifiable)
+    issue_count = len(overlaps) + len(out_of_bounds) + len(content_overlaps)
     return {
         "sheet_id": sheet_id,
         "sheet_name": title,
@@ -390,6 +390,7 @@ def check_sheet(
         "out_of_visible_range": out_of_bounds,
         "unverifiable_charts": unverifiable,
         "issue_count": issue_count,
+        "unverifiable_count": len(unverifiable),
         "warnings": warnings,
     }
 
@@ -407,6 +408,7 @@ def parse_args() -> argparse.Namespace:
 
 def success_envelope(results: list[dict[str, Any]]) -> dict[str, Any]:
     issue_count = sum(result["issue_count"] for result in results)
+    unverifiable_count = sum(result["unverifiable_count"] for result in results)
     warnings = [
         f"{result['sheet_name'] or result['sheet_id']}: {warning}"
         for result in results
@@ -417,17 +419,26 @@ def success_envelope(results: list[dict[str, Any]]) -> dict[str, Any]:
         "engine": "lark",
         "action": ACTION,
         "data": {
-            "passed": issue_count == 0,
+            "passed": issue_count == 0 and unverifiable_count == 0,
             "scope_note": "out_of_visible_range checks worksheet drawable bounds, not a device-specific browser viewport",
             "summary": {
                 "worksheet_count": len(results),
                 "chart_count": sum(result["chart_count"] for result in results),
                 "issue_count": issue_count,
+                "unverifiable_count": unverifiable_count,
             },
             "sheets": results,
         },
         "warnings": warnings,
     }
+
+
+def report_exit_code(report: dict[str, Any]) -> int:
+    if report["data"]["summary"]["unverifiable_count"] > 0:
+        return 1
+    if not report["data"]["passed"]:
+        return 2
+    return 0
 
 
 def main() -> None:
@@ -450,8 +461,9 @@ def main() -> None:
 
     report = success_envelope(results)
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    if not report["data"]["passed"]:
-        raise SystemExit(2)
+    exit_code = report_exit_code(report)
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

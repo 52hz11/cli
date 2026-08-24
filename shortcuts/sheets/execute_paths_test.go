@@ -904,7 +904,7 @@ func TestExecute_ChartCreate(t *testing.T) {
 
 func TestExecute_ChartConfigUpdate_ReadsSnapshotAndWritesPartialPatch(t *testing.T) {
 	t.Parallel()
-	read := toolOutputStub(testToken, "read", `{
+	readBefore := toolOutputStub(testToken, "read", `{
 		"sheets":[{
 			"sheet_id":"shtSubA",
 			"charts":[{
@@ -924,6 +924,25 @@ func TestExecute_ChartConfigUpdate_ReadsSnapshotAndWritesPartialPatch(t *testing
 		}]
 	}`)
 	write := toolOutputStub(testToken, "write", `{"chart_id":"chart-1"}`)
+	readAfter := toolOutputStub(testToken, "read", `{
+		"sheets":[{
+			"sheet_id":"shtSubA",
+			"charts":[{
+				"chart_id":"chart-1",
+				"details":{"snapshot":{
+					"title":{"text":"New"},
+					"plotArea":{
+						"axes":[
+							{"type":"x","position":"bottom","title":{"text":"Month"}},
+							{"type":"y","position":"left","title":{"text":"Revenue"}}
+						],
+						"plot":{"type":"line","series":[{"index":1,"points":{"point":[{"index":4,"labels":{"value":true}}]}}]}
+					},
+					"data":{"direction":"column"}
+				}}
+			}]
+		}]
+	}`)
 	out, err := runShortcutWithStubs(t, ChartConfigUpdate, []string{
 		"--url", testURL,
 		"--sheet-id", testSheetID,
@@ -931,12 +950,12 @@ func TestExecute_ChartConfigUpdate_ReadsSnapshotAndWritesPartialPatch(t *testing
 		"--title", "New",
 		"--y-axis-title", "Revenue",
 		"--last-point-label=true",
-	}, read, write)
+	}, readBefore, write, readAfter)
 	if err != nil {
 		t.Fatalf("execute failed: %v\nout=%s", err, out)
 	}
 
-	readInput := decodeToolInput(t, decodeRawEnvelopeBody(t, read.CapturedBody), "get_chart_objects")
+	readInput := decodeToolInput(t, decodeRawEnvelopeBody(t, readBefore.CapturedBody), "get_chart_objects")
 	if readInput["chart_id"] != "chart-1" {
 		t.Fatalf("read chart_id = %#v", readInput["chart_id"])
 	}
@@ -961,6 +980,12 @@ func TestExecute_ChartConfigUpdate_ReadsSnapshotAndWritesPartialPatch(t *testing
 	viewModel := data["viewModel"].(map[string]interface{})
 	if _, ok := viewModel["data"]; ok {
 		t.Fatal("config shortcut output viewModel must not include data")
+	}
+	plot := viewModel["plotArea"].(map[string]interface{})["plot"].(map[string]interface{})
+	series := plot["series"].([]interface{})
+	point := series[0].(map[string]interface{})["points"].(map[string]interface{})["point"].([]interface{})[0].(map[string]interface{})
+	if point["labels"].(map[string]interface{})["value"] != true {
+		t.Fatalf("viewModel must come from the post-update readback: %#v", viewModel)
 	}
 }
 

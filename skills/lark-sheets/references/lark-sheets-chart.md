@@ -86,9 +86,9 @@
 **多图表需求**：当用户同时提到多种分析（如"统计占比 + 对比数量"），必须创建多个图表，每个对应一种类型，不要只做一个。
 
 **常见配置错误（必须注意）**：
-- **图表类型选择错误**：用户说"堆积柱形图 / 百分比堆积"时，用 `+chart-create-basic --stack normal|percent` 或 `+chart-config-update --stack normal|percent`；用户说"占比 / 比例"时，优先考虑饼图或百分比堆积图。注意 `column` 是纵向柱形图、`bar` 是横向条形图，"对比 / 各 XX" 类纵向柱默认用 `column`。
-- **数据标签开关**：创建时用 `--data-labels`，已有图用 `+chart-config-update --data-labels`；明确关闭时传 `none`，不要为常用标签配置构造原始 `labels` 对象。用常量或重复值系列表示基准、目标、阈值或上下限时，默认关闭该系列标签；不支持单点标签时，不得用全系列重复标签代替，改用包含名称和值的系列名、图例或标题。
-- **数据标签位置**：只有用户明确要求标签位置时才传 `--data-label-position`；未明确时必须省略，让图表按类型自动选择。标签位置只控制摆放方式，不能实现仅显示末点或关键点。
+- **图表类型选择错误**：用户说"堆积柱形图 / 百分比堆积"时，用 `+chart-create-basic --stack normal|percent` 或 `+chart-config-update --stack normal|percent`；用户说"占比 / 比例"时，优先考虑饼图或百分比堆积图。注意 `column` 是纵向柱形图、`bar` 是横向条形图，"对比 / 各 XX" 类纵向柱默认用 `column`；面积图原生支持 `snapshot.plotArea.plot.type="area"`，别因速查表没列就判"不支持"。
+- **数据标签开关**：创建时用 `--data-labels`，已有图用 `+chart-config-update --data-labels`；明确关闭时传 `none`，不要为常用标签配置构造原始 `labels` 对象。高级配置中 `plotArea.plot.labels` 对象的存在性即开关；关闭标签时应省略整个 `labels` 字段，不能用全部字段置为 `false` 代替。用常量或重复值系列表示基准、目标、阈值或上下限时，默认关闭该系列标签；不支持单点标签时，不得用全系列重复标签代替，改用包含名称和值的系列名、图例或标题。
+- **数据标签位置**：只有用户明确要求且已有标签时才传 `--data-label-position`；它只调整已有标签的位置，不会单独开启标签。需要同时显示标签时一并传 `--data-labels`；未明确位置时省略，让图表按类型自动选择。标签位置只控制摆放方式，不能实现仅显示末点或关键点。
 - **数据源范围与系列名来源要对齐**：
   - 默认让 `--data-range` 包含真正的表头行 / 列；表头上方的合并大标题必须跳过。
   - 数据和语义表头分离时，`--data-range` 只传纯数据，`--header-range` 传对应的一行（column）或一列（row）表头。范围可以是不连续多范围，也支持来自多个子表；不要因为跨子表就退回原始 snapshot。
@@ -194,7 +194,7 @@ _公共四件套 · 系统：`--dry-run`_
 | `--x-axis-label-angle` | int | optional | X 轴标签旋转角度（可选值：`-90` / `-45` / `0` / `45` / `90`） |
 | `--y-axis-label-angle` | int | optional | 左 Y 轴标签旋转角度（可选值：`-90` / `-45` / `0` / `45` / `90`） |
 | `--data-labels` | string | optional | 数据标签内容；value、category、percentage 可按 value_category_percentage 顺序组成任意非空组合；series 显示系列名称，none 隐藏标签（可选值：`none` / `value` / `category` / `percentage` / `value_category` / `value_percentage` / `category_percentage` / `value_category_percentage` / `series`） |
-| `--data-label-position` | string | optional | 仅当用户明确指定时传入；省略时按图表类型自动优化数据标签位置（可选值：`auto` / `top` / `bottom` / `left` / `right` / `center` / `inside` / `outside`） |
+| `--data-label-position` | string | optional | 仅当用户明确指定时传入；只调整已有数据标签的位置，不会单独开启标签；省略时按图表类型自动优化数据标签位置（可选值：`auto` / `top` / `bottom` / `left` / `right` / `center` / `inside` / `outside`） |
 | `--stack` | string | optional | 堆叠模式（可选值：`none` / `normal` / `percent`） |
 | `--stacked` | bool | optional | 兼容别名；等价于 --stack normal（隐藏 flag：不在 `--help` 列出，但可正常传入） |
 | `--smooth` | bool | optional | 是否使用平滑曲线；支持 --smooth=false 和 --smooth false |
@@ -224,7 +224,8 @@ _公共四件套 · 系统：`--dry-run`_
 | `--y-axis-min` | float64 | optional | 左 Y 轴的显示范围下界；必须小于 --y-axis-max |
 | `--y-axis-max` | float64 | optional | 左 Y 轴的显示范围上界；必须大于 --y-axis-min |
 | `--data-labels` | string | optional | 数据标签内容；value、category、percentage 可按 value_category_percentage 顺序组成任意非空组合；series 显示系列名称，none 隐藏标签（可选值：`none` / `value` / `category` / `percentage` / `value_category` / `value_percentage` / `category_percentage` / `value_category_percentage` / `series`） |
-| `--data-label-position` | string | optional | 仅当用户明确指定时传入；省略时按图表类型自动优化数据标签位置（可选值：`auto` / `top` / `bottom` / `left` / `right` / `center` / `inside` / `outside`） |
+| `--data-label-position` | string | optional | 仅当用户明确指定时传入；只调整已有数据标签的位置，不会单独开启标签；省略时按图表类型自动优化数据标签位置（可选值：`auto` / `top` / `bottom` / `left` / `right` / `center` / `inside` / `outside`） |
+| `--last-point-label` | bool | optional | 仅折线图、面积图、雷达图及组合图中的线性系列；true 开启每个系列最后一个数据点的数值标签，false 关闭这些单点标签 |
 | `--stack` | string | optional | 堆叠模式（可选值：`none` / `normal` / `percent`） |
 | `--stacked` | bool | optional | 兼容别名；等价于 --stack normal（隐藏 flag：不在 `--help` 列出，但可正常传入） |
 | `--smooth` | bool | optional | 是否使用平滑曲线；支持 --smooth=false 和 --smooth false |

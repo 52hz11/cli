@@ -3725,7 +3725,7 @@
         "kind": "own",
         "type": "string",
         "required": "optional",
-        "desc": "Pass only when the user explicitly requests a position; omit it for chart-type-aware data label placement",
+        "desc": "Pass only when the user explicitly requests a position; it only repositions existing data labels and does not enable labels by itself; omit it for chart-type-aware placement",
         "enum": [
           "auto",
           "top",
@@ -3995,7 +3995,7 @@
         "kind": "own",
         "type": "string",
         "required": "optional",
-        "desc": "Pass only when the user explicitly requests a position; omit it for chart-type-aware data label placement",
+        "desc": "Pass only when the user explicitly requests a position; it only repositions existing data labels and does not enable labels by itself; omit it for chart-type-aware placement",
         "enum": [
           "auto",
           "top",

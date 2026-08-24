@@ -414,6 +414,43 @@ func TestChartConfigUpdate_XAxisBounds(t *testing.T) {
 	}
 }
 
+func TestChartConfigUpdate_XAxisBoundsRequireContinuousExistingAxis(t *testing.T) {
+	t.Parallel()
+	fv := newMapFlagViewForCommand("+chart-config-update", map[string]interface{}{
+		"sheet-id":   testSheetID,
+		"chart-id":   "chart-1",
+		"x-axis-min": 237,
+	})
+
+	ordinal := map[string]interface{}{
+		"plotArea": map[string]interface{}{
+			"axes": []interface{}{
+				map[string]interface{}{"type": "x", "position": "bottom", "valueType": "ordinal"},
+			},
+		},
+	}
+	if _, _, err := chartConfigUpdateInputFromSnapshot(fv, "token", testSheetID, "", ordinal); err == nil ||
+		!strings.Contains(err.Error(), "continuous numeric X axis") {
+		t.Fatalf("error = %v, want existing continuous X-axis validation", err)
+	}
+
+	linear := map[string]interface{}{
+		"plotArea": map[string]interface{}{
+			"axes": []interface{}{
+				map[string]interface{}{"type": "x", "position": "bottom", "valueType": "linear"},
+			},
+		},
+	}
+	input, _, err := chartConfigUpdateInputFromSnapshot(fv, "token", testSheetID, "", linear)
+	if err != nil {
+		t.Fatalf("linear X axis rejected: %v", err)
+	}
+	xAxis := chartDryRunSnapshot(t, input)["plotArea"].(map[string]interface{})["axes"].([]interface{})[0].(map[string]interface{})
+	if xAxis["min"] != float64(237) {
+		t.Fatalf("x axis = %#v, want min=237", xAxis)
+	}
+}
+
 func TestChartSemanticShortcuts_CompatibleAliases(t *testing.T) {
 	t.Parallel()
 	chartCreateBasic := shortcutFromRegistry(t, "+chart-create-basic")
@@ -490,6 +527,45 @@ func TestChartSemanticShortcuts_DataLabelCombinations(t *testing.T) {
 				t.Fatalf("%s labels = %#v, want category=%t value=%t percentage=%t", tc.input, labels, tc.category, tc.value, tc.percentage)
 			}
 		})
+	}
+}
+
+func TestChartConfigUpdate_DataLabelPositionDoesNotEnableLabels(t *testing.T) {
+	t.Parallel()
+	current := map[string]interface{}{
+		"plotArea": map[string]interface{}{
+			"plot": map[string]interface{}{"type": "line"},
+		},
+	}
+	patch, viewModel := applyChartConfigPatch(current, map[string]interface{}{"data_label_position": "top"})
+	if len(patch) != 0 {
+		t.Fatalf("patch = %#v, want no-op when labels are absent", patch)
+	}
+	plot := viewModel["plotArea"].(map[string]interface{})["plot"].(map[string]interface{})
+	if _, ok := plot["labels"]; ok {
+		t.Fatalf("labels = %#v, position-only update must not enable labels", plot["labels"])
+	}
+	fv := newMapFlagViewForCommand("+chart-config-update", map[string]interface{}{
+		"sheet-id":            testSheetID,
+		"chart-id":            "chart-1",
+		"data-label-position": "top",
+	})
+	if _, _, err := chartConfigUpdateInputFromSnapshot(fv, "token", testSheetID, "", current); err == nil ||
+		!strings.Contains(err.Error(), "requires existing data labels") {
+		t.Fatalf("error = %v, want position-only update to reject a chart without labels", err)
+	}
+	withLabels := map[string]interface{}{
+		"plotArea": map[string]interface{}{
+			"plot": map[string]interface{}{
+				"type":   "line",
+				"labels": map[string]interface{}{"value": true},
+			},
+		},
+	}
+	patch, _ = applyChartConfigPatch(withLabels, map[string]interface{}{"data_label_position": "top"})
+	labels := patch["plotArea"].(map[string]interface{})["plot"].(map[string]interface{})["labels"].(map[string]interface{})
+	if labels["value"] != true || labels["position"] != "top" {
+		t.Fatalf("labels = %#v, want existing content preserved with position=top", labels)
 	}
 }
 

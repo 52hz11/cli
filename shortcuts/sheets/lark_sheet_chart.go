@@ -207,6 +207,15 @@ var ChartConfigUpdate = common.Shortcut{
 		if err != nil {
 			return err
 		}
+		if runtime.Changed("last-point-label") {
+			updatedSnapshot, readErr := fetchChartSnapshot(
+				ctx, runtime, token, sheetID, sheetName, runtime.Str("chart-id"),
+			)
+			if readErr != nil {
+				return readErr
+			}
+			viewModel = chartViewModel(updatedSnapshot)
+		}
 		runtime.Out(withChartShortcutResult(out, "viewModel", viewModel), nil)
 		return nil
 	},
@@ -645,6 +654,9 @@ func chartConfigUpdateInputFromSnapshot(
 	if _, err := chartConfigUpdateInput(rt, token, sheetID, sheetName); err != nil {
 		return nil, nil, err
 	}
+	if err := validateChartConfigSnapshot(rt, snapshot); err != nil {
+		return nil, nil, err
+	}
 	updates := map[string]interface{}{}
 	addChartSemanticConfig(rt, updates)
 	patch, viewModel := applyChartConfigPatch(snapshot, updates)
@@ -1074,13 +1086,12 @@ func applyChartConfigPatch(
 		}
 		plotChanged = true
 	} else if position, ok := updates["data_label_position"]; ok {
-		labels := chartMap(plot["labels"])
-		if len(labels) == 0 {
-			labels["value"] = true
+		labels, exists := plot["labels"].(map[string]interface{})
+		if exists {
+			labels["position"] = position
+			plot["labels"] = labels
+			plotChanged = true
 		}
-		labels["position"] = position
-		plot["labels"] = labels
-		plotChanged = true
 	}
 	if value, ok := updates["stack"].(string); ok {
 		extra := chartMap(plot["extra"])
@@ -1122,9 +1133,13 @@ func applyChartConfigPatch(
 	if plotChanged {
 		patch["plotArea"] = plotArea
 	}
-	viewModel := cloneChartMap(next)
+	return patch, chartViewModel(next)
+}
+
+func chartViewModel(snapshot map[string]interface{}) map[string]interface{} {
+	viewModel := cloneChartMap(snapshot)
 	delete(viewModel, "data")
-	return patch, viewModel
+	return viewModel
 }
 
 func cloneChartMap(value map[string]interface{}) map[string]interface{} {
@@ -1145,6 +1160,16 @@ func chartMap(value interface{}) map[string]interface{} {
 }
 
 func ensureChartAxisMap(plotArea map[string]interface{}, axisType, position string) map[string]interface{} {
+	if axis := findChartAxisMap(plotArea, axisType, position); axis != nil {
+		return axis
+	}
+	axes, _ := plotArea["axes"].([]interface{})
+	axis := map[string]interface{}{"type": axisType, "position": position}
+	plotArea["axes"] = append(axes, axis)
+	return axis
+}
+
+func findChartAxisMap(plotArea map[string]interface{}, axisType, position string) map[string]interface{} {
 	axes, _ := plotArea["axes"].([]interface{})
 	for _, raw := range axes {
 		axis, _ := raw.(map[string]interface{})
@@ -1152,9 +1177,7 @@ func ensureChartAxisMap(plotArea map[string]interface{}, axisType, position stri
 			return axis
 		}
 	}
-	axis := map[string]interface{}{"type": axisType, "position": position}
-	plotArea["axes"] = append(axes, axis)
-	return axis
+	return nil
 }
 
 func chartTypeFromSnapshot(snapshot map[string]interface{}) string {
@@ -1602,6 +1625,36 @@ func validateChartSemanticEnums(rt flagView) error {
 		)
 	}
 	return nil
+}
+
+func validateChartConfigSnapshot(rt flagView, snapshot map[string]interface{}) error {
+	if rt.Changed("data-label-position") && !rt.Changed("data-labels") {
+		plotArea := chartMap(snapshot["plotArea"])
+		plot := chartMap(plotArea["plot"])
+		if _, exists := plot["labels"].(map[string]interface{}); !exists {
+			return sheetsValidationForFlag(
+				"data-label-position",
+				"--data-label-position requires existing data labels or --data-labels in the same update",
+			)
+		}
+	}
+	if !rt.Changed("x-axis-min") && !rt.Changed("x-axis-max") {
+		return nil
+	}
+	plotArea := chartMap(snapshot["plotArea"])
+	xAxis := findChartAxisMap(plotArea, "x", "bottom")
+	if valueType, _ := xAxis["valueType"].(string); valueType == "linear" {
+		return nil
+	}
+	flag := "x-axis-min"
+	if !rt.Changed(flag) {
+		flag = "x-axis-max"
+	}
+	return sheetsValidationForFlag(
+		flag,
+		"--%s requires the existing bottom X axis to be a continuous numeric X axis (valueType=linear)",
+		flag,
+	)
 }
 
 func validateChartAxisBounds(rt flagView, axis string, numericAxis bool) error {
