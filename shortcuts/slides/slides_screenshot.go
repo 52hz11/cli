@@ -1003,7 +1003,7 @@ func slidesScreenshotOverviewImages(data map[string]interface{}, requestedNumber
 		}
 		id := common.GetString(item, "slide_id")
 		if id == "" {
-			return nil, slidesScreenshotAPIDataError(data, "slides screenshot returned no slide_id for slide_number %d", number)
+			id = strconv.Itoa(number)
 		}
 		b, err := base64.StdEncoding.DecodeString(common.GetString(item, "data"))
 		if err != nil {

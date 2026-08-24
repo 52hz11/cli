@@ -103,6 +103,15 @@ func TestSlidesScreenshotOverviewImagesRejectsInvalidResponseAndOrdersByRequeste
 		t.Fatalf("first image = %#v, want p1/red", got)
 	}
 
+	withoutID := map[string]interface{}{"slide_number": 1, "data": red}
+	fallback, err := slidesScreenshotOverviewImages(map[string]interface{}{"slide_images": []interface{}{withoutID}}, []int{1})
+	if err != nil {
+		t.Fatalf("missing slide_id: %v", err)
+	}
+	if got, want := fallback[0].id, "1"; got != want {
+		t.Fatalf("fallback slide_id = %q, want %q", got, want)
+	}
+
 	for _, tc := range []struct {
 		name string
 		data map[string]interface{}
