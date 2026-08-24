@@ -199,7 +199,7 @@ _公共四件套 · 系统：`--dry-run`_
 | `--stacked` | bool | optional | 兼容别名；等价于 --stack normal（隐藏 flag：不在 `--help` 列出，但可正常传入） |
 | `--smooth` | bool | optional | 是否使用平滑曲线；支持 --smooth=false 和 --smooth false |
 | `--color-palette` | string | optional | 预设整图配色主题；与 --colors 互斥（可选值：`brandColorSeries@v2` / `rainbowColorSeries@v2` / `complementaryColorSeries@v2` / `converseColorSeries@v2` / `primaryColorSeries@v2` / `singleColorSeries-B-@v2` / `singleColorSeries-W-@v2` / `singleColorSeries-G-@v2` / `singleColorSeries-Y-@v2` / `singleColorSeries-O-@v2` / `singleColorSeries-R-@v2` / `singleColorSeries-D-@v2`） |
-| `--colors` | string_slice | optional | 自定义整图系列颜色，逗号分隔且至少 2 个十六进制色值；与 --color-palette 互斥 |
+| `--colors` | string_slice | optional | 自定义整图系列颜色，逗号分隔且至少 1 个十六进制色值；单色会应用到所有系列；与 --color-palette 互斥 |
 | `--anchor-cell` | string | optional | 可选图表锚点单元格，如 F2；省略时放到数据范围右侧 |
 | `--width` | int | optional | 可选图表宽度；必须与 --height 同时传 |
 | `--height` | int | optional | 可选图表高度；必须与 --width 同时传 |
@@ -230,7 +230,7 @@ _公共四件套 · 系统：`--dry-run`_
 | `--stacked` | bool | optional | 兼容别名；等价于 --stack normal（隐藏 flag：不在 `--help` 列出，但可正常传入） |
 | `--smooth` | bool | optional | 是否使用平滑曲线；支持 --smooth=false 和 --smooth false |
 | `--color-palette` | string | optional | 预设整图配色主题；与 --colors 互斥（可选值：`brandColorSeries@v2` / `rainbowColorSeries@v2` / `complementaryColorSeries@v2` / `converseColorSeries@v2` / `primaryColorSeries@v2` / `singleColorSeries-B-@v2` / `singleColorSeries-W-@v2` / `singleColorSeries-G-@v2` / `singleColorSeries-Y-@v2` / `singleColorSeries-O-@v2` / `singleColorSeries-R-@v2` / `singleColorSeries-D-@v2`） |
-| `--colors` | string_slice | optional | 自定义整图系列颜色，逗号分隔且至少 2 个十六进制色值；与 --color-palette 互斥 |
+| `--colors` | string_slice | optional | 自定义整图系列颜色，逗号分隔且至少 1 个十六进制色值；单色会应用到所有系列；与 --color-palette 互斥 |
 
 ### `+chart-data-update`
 

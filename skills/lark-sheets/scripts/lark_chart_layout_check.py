@@ -434,11 +434,11 @@ def success_envelope(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def report_exit_code(report: dict[str, Any]) -> int:
-    if report["data"]["summary"]["unverifiable_count"] > 0:
-        return 1
-    if not report["data"]["passed"]:
+    if report["data"]["passed"]:
+        return 0
+    if report["data"]["summary"]["issue_count"] > 0:
         return 2
-    return 0
+    return 1
 
 
 def main() -> None:
@@ -458,6 +458,7 @@ def main() -> None:
         ]
     except (LarkCliError, KeyError, TypeError, ValueError) as exc:
         emit_error(ACTION, str(exc))
+        raise SystemExit(1) from exc
 
     report = success_envelope(results)
     print(json.dumps(report, ensure_ascii=False, indent=2))

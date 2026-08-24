@@ -91,15 +91,11 @@ var BatchUpdate = common.Shortcut{
 		if err != nil {
 			return err
 		}
-		rawOps, err := parseBatchOperationsFlag(runtime)
-		if err != nil {
-			return err
-		}
 		plan, err := buildBatchUpdatePlan(runtime, token)
 		if err != nil {
 			return err
 		}
-		if err := prepareBatchChartUpdates(ctx, runtime, token, rawOps, plan); err != nil {
+		if err := prepareBatchChartUpdates(ctx, runtime, token, plan); err != nil {
 			return err
 		}
 		for _, w := range batchWarnings(runtime) {
@@ -216,15 +212,11 @@ var BatchChartUpdate = common.Shortcut{
 		if err != nil {
 			return err
 		}
-		rawOps, err := parseBatchOperationsFlag(runtime)
-		if err != nil {
-			return err
-		}
 		plan, err := buildChartBatchPlan(runtime, token, chartUpdateBatchDispatch, "+batch-chart-update")
 		if err != nil {
 			return err
 		}
-		if err := prepareBatchChartUpdates(ctx, runtime, token, rawOps, plan); err != nil {
+		if err := prepareBatchChartUpdates(ctx, runtime, token, plan); err != nil {
 			return err
 		}
 		out, err := callTool(ctx, runtime, token, ToolKindWrite, "batch_update", plan.input)
@@ -314,9 +306,10 @@ func buildChartBatchPlan(
 			"operations":        translated,
 			"continue_on_error": continueOnError,
 		},
-		originalIndexes: originalIndexes,
-		localFailures:   localFailures,
-		total:           len(rawOps),
+		originalIndexes:      originalIndexes,
+		normalizedOperations: normalizedBatchOperations(rawOps, originalIndexes),
+		localFailures:        localFailures,
+		total:                len(rawOps),
 	}, nil
 }
 
@@ -371,23 +364,23 @@ func prepareBatchChartUpdates(
 	ctx context.Context,
 	runtime *common.RuntimeContext,
 	token string,
-	rawOps []interface{},
 	plan *batchUpdatePlan,
 ) error {
 	translated, _ := plan.input["operations"].([]interface{})
 	continueOnError, _ := plan.input["continue_on_error"].(bool)
 	prepared := make([]interface{}, 0, len(translated))
 	preparedIndexes := make([]int, 0, len(translated))
+	preparedNormalized := make([]batchNormalizedOperation, 0, len(translated))
 	for remoteIndex, rawIndex := range plan.originalIndexes {
-		raw, _ := rawOps[rawIndex].(map[string]interface{})
-		shortcut, _ := raw["shortcut"].(string)
+		normalized := plan.normalizedOperations[remoteIndex]
+		shortcut := normalized.shortcut
 		if shortcut != "+chart-config-update" && shortcut != "+chart-data-update" {
 			prepared = append(prepared, translated[remoteIndex])
 			preparedIndexes = append(preparedIndexes, rawIndex)
+			preparedNormalized = append(preparedNormalized, normalized)
 			continue
 		}
-		input, _ := raw["input"].(map[string]interface{})
-		fv := newMapFlagViewForCommand(shortcut, input)
+		fv := newMapFlagViewForCommand(shortcut, normalized.input)
 		sheetID := strings.TrimSpace(fv.Str("sheet-id"))
 		sheetName := strings.TrimSpace(fv.Str("sheet-name"))
 		chartID := strings.TrimSpace(fv.Str("chart-id"))
@@ -429,12 +422,14 @@ func prepareBatchChartUpdates(
 		item["input"] = body
 		prepared = append(prepared, item)
 		preparedIndexes = append(preparedIndexes, rawIndex)
+		preparedNormalized = append(preparedNormalized, normalized)
 	}
 	if len(prepared) == 0 {
 		return sheetsValidationForFlag("operations", "all chart updates failed CLI preflight; no write request was sent")
 	}
 	plan.input["operations"] = prepared
 	plan.originalIndexes = preparedIndexes
+	plan.normalizedOperations = preparedNormalized
 	return nil
 }
 
@@ -475,11 +470,28 @@ type batchLocalValidationFailure struct {
 	Error    string `json:"error"`
 }
 
+type batchNormalizedOperation struct {
+	shortcut string
+	input    map[string]interface{}
+}
+
 type batchUpdatePlan struct {
-	input           map[string]interface{}
-	originalIndexes []int
-	localFailures   []batchLocalValidationFailure
-	total           int
+	input                map[string]interface{}
+	originalIndexes      []int
+	normalizedOperations []batchNormalizedOperation
+	localFailures        []batchLocalValidationFailure
+	total                int
+}
+
+func normalizedBatchOperations(rawOps []interface{}, originalIndexes []int) []batchNormalizedOperation {
+	operations := make([]batchNormalizedOperation, 0, len(originalIndexes))
+	for _, index := range originalIndexes {
+		raw, _ := rawOps[index].(map[string]interface{})
+		shortcut, _ := raw["shortcut"].(string)
+		input, _ := raw["input"].(map[string]interface{})
+		operations = append(operations, batchNormalizedOperation{shortcut: shortcut, input: input})
+	}
+	return operations
 }
 
 func buildBatchUpdatePlan(runtime *common.RuntimeContext, token string) (*batchUpdatePlan, error) {
@@ -518,10 +530,11 @@ func buildBatchUpdatePlan(runtime *common.RuntimeContext, token string) (*batchU
 		})
 	}
 	return &batchUpdatePlan{
-		input:           input,
-		originalIndexes: originalIndexes,
-		localFailures:   localFailures,
-		total:           len(rawOps),
+		input:                input,
+		originalIndexes:      originalIndexes,
+		normalizedOperations: normalizedBatchOperations(rawOps, originalIndexes),
+		localFailures:        localFailures,
+		total:                len(rawOps),
 	}, nil
 }
 

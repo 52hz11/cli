@@ -569,7 +569,7 @@ func TestExecute_BatchChartUpdate_PreflightsSnapshots(t *testing.T) {
 		"--url", testURL,
 		"--operations", `[{
 			"shortcut":"+chart-config-update",
-			"input":{"sheet-id":"shtSubA","chart-id":"chart-1","title":"New"}
+			"input":{"sheetId":"shtSubA","chartId":"chart-1","title":"New"}
 		}]`,
 	}, read, write)
 	if err != nil {
@@ -611,7 +611,7 @@ func TestExecute_BatchUpdate_MixesCellsAndSemanticChartUpdate(t *testing.T) {
 		"--url", testURL,
 		"--operations", `[
 			{"shortcut":"+cells-set","input":{"sheet-id":"shtSubA","range":"A1","cells":[[{"value":1}]]}},
-			{"shortcut":"+chart-config-update","input":{"sheet-id":"shtSubA","chart-id":"chart-1","title":"New"}}
+			{"shortcut":"+chart-config-update","input":{"sheetId":"shtSubA","chartId":"chart-1","title":"New"}}
 		]`,
 		"--yes",
 	}, read, write)

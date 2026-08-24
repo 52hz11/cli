@@ -616,7 +616,7 @@ func TestChartSemanticShortcuts_CompatibleAliasesInBatch(t *testing.T) {
 	}
 }
 
-func TestChartSemanticShortcuts_SingleCustomColorIsExpanded(t *testing.T) {
+func TestChartSemanticShortcuts_SingleCustomColorStaysSingle(t *testing.T) {
 	t.Parallel()
 
 	body := parseDryRunBody(t, ChartCreateBasic, []string{
@@ -628,7 +628,7 @@ func TestChartSemanticShortcuts_SingleCustomColorIsExpanded(t *testing.T) {
 	})
 	basic := decodeToolInput(t, body, "manage_chart_object")["basic_chart"].(map[string]interface{})
 	colors := basic["colors"].([]interface{})
-	if len(colors) != 2 || colors[0] != "#112233" || colors[1] != "#112233" {
+	if len(colors) != 1 || colors[0] != "#112233" {
 		t.Fatalf("standalone colors = %#v", colors)
 	}
 
@@ -642,8 +642,20 @@ func TestChartSemanticShortcuts_SingleCustomColorIsExpanded(t *testing.T) {
 	ops := input["operations"].([]interface{})
 	basic = ops[0].(map[string]interface{})["input"].(map[string]interface{})["basic_chart"].(map[string]interface{})
 	colors = basic["colors"].([]interface{})
-	if len(colors) != 2 || colors[0] != "#445566" || colors[1] != "#445566" {
+	if len(colors) != 1 || colors[0] != "#445566" {
 		t.Fatalf("batch array colors = %#v", colors)
+	}
+
+	body = parseDryRunBody(t, ChartConfigUpdate, []string{
+		"--url", testURL,
+		"--sheet-id", testSheetID,
+		"--chart-id", "chart-1",
+		"--colors", "#778899",
+	})
+	snapshot := chartDryRunSnapshot(t, decodeToolInput(t, body, "manage_chart_object"))
+	colors = snapshot["style"].(map[string]interface{})["colorTheme"].([]interface{})
+	if len(colors) != 1 || colors[0] != "#778899" {
+		t.Fatalf("update colors = %#v", colors)
 	}
 }
 
