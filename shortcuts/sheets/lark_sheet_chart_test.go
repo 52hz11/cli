@@ -967,6 +967,18 @@ func TestChartCreateBasic_RejectsHorizontalHeaderForRowDirection(t *testing.T) {
 	}
 }
 
+func TestChartCreateBasic_RejectsHeaderCountMismatch(t *testing.T) {
+	t.Parallel()
+	_, _, err := runShortcutCapturingErr(t, ChartCreateBasic, []string{
+		"--url", testURL,
+		"--sheet-id", testSheetID,
+		"--chart-type", "line",
+		"--data-range", "A2:C4",
+		"--header-range", "A1:B1",
+	})
+	requireValidation(t, err, "provides 2 headers but --data-range has 3 dimensions")
+}
+
 func TestChartCreateBasic_SuggestsRowDirectionForHorizontalCategories(t *testing.T) {
 	t.Parallel()
 	_, _, err := runShortcutCapturingErr(t, ChartCreateBasic, []string{
@@ -1020,6 +1032,31 @@ func TestChartDataUpdate_ExplicitDirectionAndMultipleRanges(t *testing.T) {
 		refs[1].(map[string]interface{})["value"] != "'Sheet2'!A1:B10" {
 		t.Errorf("cross-sheet refs = %#v, want %q", refs, dataRange)
 	}
+}
+
+func TestChartDataUpdate_RejectsHeaderDirectionDuringDryRun(t *testing.T) {
+	t.Parallel()
+	_, _, err := runShortcutCapturingErr(t, ChartDataUpdate, []string{
+		"--url", testURL,
+		"--sheet-id", testSheetID,
+		"--chart-id", "chart-1",
+		"--data-range", "A2:C4",
+		"--data-direction", "row",
+		"--header-range", "A1:M1",
+	})
+	requireValidation(t, err, "row-oriented --header-range must be one column")
+}
+
+func TestChartDataUpdate_RejectsInvalidRangeNormalizationDuringDryRun(t *testing.T) {
+	t.Parallel()
+	_, _, err := runShortcutCapturingErr(t, ChartDataUpdate, []string{
+		"--url", testURL,
+		"--sheet-id", testSheetID,
+		"--chart-id", "chart-1",
+		"--data-range", "'Sheet1'!A1:A10,'Sheet2'!B2:B10",
+		"--data-direction", "column",
+	})
+	requireValidation(t, err, "cross-sheet --data-range items must align")
 }
 
 func TestChartDataUpdate_NormalizationNoticeOnlyWhenRangesMerge(t *testing.T) {

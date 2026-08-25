@@ -109,8 +109,9 @@ func TestPrintFlagSchema_ChartUpdateIsRecursivePartial(t *testing.T) {
 	}
 
 	updateSeriesItem := decode(t, "+chart-update", "properties.snapshot.data.dim2.series.items")
-	if _, present := updateSeriesItem["required"]; present {
-		t.Fatalf("chart-update array item schema must be recursively partial; required=%v", updateSeriesItem["required"])
+	required, _ := updateSeriesItem["required"].([]interface{})
+	if len(required) != 1 || required[0] != "index" {
+		t.Fatalf("chart-update replacement array item schema must retain required index; required=%v", required)
 	}
 }
 

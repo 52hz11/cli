@@ -120,9 +120,10 @@ func materializeChartSnapshotSchema(raw json.RawMessage) (json.RawMessage, error
 }
 
 // recursivePartialJSONSchema derives an update schema from a full object
-// schema by removing required constraints at every nested schema node. The
-// remaining type, enum, bounds, and additionalProperties constraints still
-// reject malformed fields that are present in the patch.
+// schema by removing required constraints from patchable objects. Arrays are
+// replaced as a whole, so their item schemas remain strict. The remaining
+// type, enum, bounds, and additionalProperties constraints still reject
+// malformed fields that are present in the patch.
 func recursivePartialJSONSchema(raw json.RawMessage) (json.RawMessage, error) {
 	var schema map[string]interface{}
 	if err := json.Unmarshal(raw, &schema); err != nil {
@@ -141,10 +142,10 @@ func makeJSONSchemaRecursivePartial(schema map[string]interface{}) {
 			makeJSONSchemaValueRecursivePartial(child)
 		}
 	}
-	for _, key := range []string{"items", "additionalProperties", "contains", "not", "if", "then", "else", "propertyNames"} {
+	for _, key := range []string{"additionalProperties", "not", "if", "then", "else", "propertyNames"} {
 		makeJSONSchemaValueRecursivePartial(schema[key])
 	}
-	for _, key := range []string{"prefixItems", "allOf", "anyOf", "oneOf"} {
+	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
 		makeJSONSchemaValueRecursivePartial(schema[key])
 	}
 }

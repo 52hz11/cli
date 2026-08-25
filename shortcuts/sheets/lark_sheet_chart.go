@@ -447,6 +447,9 @@ func chartCreateBasicInput(rt flagView, token, sheetID, sheetName string) (map[s
 		if err := validateChartHeaderRangeDirection(headerRange, direction); err != nil {
 			return nil, err
 		}
+		if _, err := buildChartHeaderRefs(headerRange, direction, dimensionCount); err != nil {
+			return nil, err
+		}
 		basic["header_range"] = headerRange
 	}
 	if rt.Changed("data-direction") {
@@ -632,13 +635,17 @@ func chartDataUpdateInput(rt flagView, token, sheetID, sheetName string) (map[st
 			updates[strings.ReplaceAll(item.flag, "-", "_")] = item.index
 		}
 	}
+	dryRunData, err := chartDataDryRunPatch(updates)
+	if err != nil {
+		return nil, err
+	}
 	input := map[string]interface{}{
 		"excel_id":  token,
 		"operation": "update",
 		"chart_id":  chartID,
 		"properties": map[string]interface{}{
 			"snapshot": map[string]interface{}{
-				"data": chartDataDryRunPatch(updates),
+				"data": dryRunData,
 			},
 		},
 	}
@@ -868,16 +875,22 @@ func chartDataUpdateInputFromSnapshot(
 	return input, data, rangeValues, notice, nil
 }
 
-func chartDataDryRunPatch(updates map[string]interface{}) map[string]interface{} {
+func chartDataDryRunPatch(updates map[string]interface{}) (map[string]interface{}, error) {
 	data := map[string]interface{}{}
 	dataRange, _ := updates["data_range"].(string)
 	direction, _ := updates["data_direction"].(string)
 	if direction == "" {
 		direction = "column"
 	}
-	normalized, dimensionCount, _, _, _ := normalizeBasicChartDataRanges(dataRange, direction)
+	normalized, dimensionCount, _, _, err := normalizeBasicChartDataRanges(dataRange, direction)
+	if err != nil {
+		return nil, err
+	}
 	if dataRange != "" {
-		ranges, _ := splitChartDataRanges(normalized)
+		ranges, err := splitChartDataRanges(normalized)
+		if err != nil {
+			return nil, sheetsValidationForFlag("data-range", "invalid --data-range %q: %v", normalized, err)
+		}
 		refs := make([]interface{}, 0, len(ranges))
 		for _, item := range ranges {
 			refs = append(refs, map[string]interface{}{"value": item})
@@ -904,7 +917,10 @@ func chartDataDryRunPatch(updates map[string]interface{}) map[string]interface{}
 	}
 	headerRefs := map[int]string{}
 	if headerRange, ok := updates["header_range"].(string); ok {
-		headerRefs, _ = buildChartHeaderRefs(headerRange, direction, dimensionCount)
+		headerRefs, err = buildChartHeaderRefs(headerRange, direction, dimensionCount)
+		if err != nil {
+			return nil, err
+		}
 		data["headerMode"] = "detached"
 	}
 	dim1 := map[string]interface{}{"index": dim1Index}
@@ -936,7 +952,7 @@ func chartDataDryRunPatch(updates map[string]interface{}) map[string]interface{}
 		series = append(series, item)
 	}
 	data["dim2"] = map[string]interface{}{"series": series}
-	return data
+	return data, nil
 }
 
 func fetchChartSnapshot(

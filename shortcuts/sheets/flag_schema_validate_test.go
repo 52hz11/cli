@@ -1077,6 +1077,20 @@ func TestValidateInputAgainstSchema_ChartUpdateRecursivePartial(t *testing.T) {
 	if !strings.Contains(invalidVE.Message, "not in enum") {
 		t.Errorf("error = %q, want enum validation", invalidVE.Message)
 	}
+
+	invalidSeries := map[string]interface{}{
+		"properties": map[string]interface{}{
+			"snapshot": map[string]interface{}{
+				"data": map[string]interface{}{
+					"dim2": map[string]interface{}{
+						"series": []interface{}{map[string]interface{}{"nameRef": "A1"}},
+					},
+				},
+			},
+		},
+	}
+	seriesErr := validateInputAgainstSchema(mapFlagView{command: "+chart-update"}, invalidSeries)
+	requireValidation(t, seriesErr, `required property "index" is missing`)
 }
 
 // TestValidateInputAgainstSchema_RealAdditionalProperties pins the
