@@ -289,6 +289,7 @@ Shortcut 是对常用操作的高级封装（`lark-cli mail +<verb> [flags]`）�
 | [`+decline-receipt`](references/lark-mail-decline-receipt.md) | Dismiss the read-receipt request banner on an incoming mail by clearing its READ_RECEIPT_REQUEST label, without sending a receipt. Use when the user wants to silence the prompt but refuse to confirm they have read it. Idempotent — safe to re-run. |
 | [`+signature`](references/lark-mail-signature.md) | List or view email signatures with default usage info. |
 | [`+auto-reply`](references/lark-mail-auto-reply.md) | Get mailbox auto-reply settings. |
+| [`+auto-reply-image-download-url`](references/lark-mail-auto-reply.md) | Get temporary download URLs for auto-reply images. |
 | [`+auto-reply-modify`](references/lark-mail-auto-reply.md) | Modify mailbox auto-reply settings with friendly flags after user confirmation. |
 | [`+share-to-chat`](references/lark-mail-share-to-chat.md) | Share an email or thread as a card to a Lark IM chat. |
 | [`+template-create`](references/lark-mail-template-create.md) | Create a personal mail template. Scans HTML <img src> local paths (reusing draft inline-image detection), uploads inline images and non-inline attachments to Drive, rewrites HTML to cid: references, and POSTs a Template payload to mail.user_mailbox.templates.create. |

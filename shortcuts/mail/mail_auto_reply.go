@@ -5,7 +5,6 @@ package mail
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -19,10 +18,8 @@ import (
 
 	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/output"
-	"github.com/larksuite/cli/internal/validate"
 	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/larksuite/cli/shortcuts/mail/filecheck"
-	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"golang.org/x/net/html"
 )
 
@@ -135,8 +132,57 @@ var MailAutoReplyModify = common.Shortcut{
 	},
 }
 
+var MailAutoReplyImageDownloadURL = common.Shortcut{
+	Service:     "mail",
+	Command:     "+auto-reply-image-download-url",
+	Description: "Get temporary download URLs for images referenced by mailbox auto-reply settings.",
+	Risk:        "read",
+	Scopes:      []string{"mail:user_mailbox.message:readonly"},
+	AuthTypes:   []string{"user"},
+	HasFormat:   true,
+	Flags: []common.Flag{
+		{Name: "mailbox", Default: "me", Desc: "Mailbox address (default: me)."},
+		{Name: "file-keys", Desc: "Required. Comma-separated auto-reply image file_key values from +auto-reply output.", Required: true},
+	},
+	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		if len(autoReplyImageFileKeys(runtime)) == 0 {
+			return mailValidationParamError("--file-keys", "--file-keys is required")
+		}
+		return nil
+	},
+	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
+		mailboxID := resolveAutoReplyMailboxID(runtime)
+		return common.NewDryRunAPI().
+			Desc("Get temporary download URLs for auto-reply images.").
+			GET(autoReplyImageDownloadURLPath(mailboxID, autoReplyImageFileKeys(runtime)))
+	},
+	Execute: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		mailboxID := resolveAutoReplyMailboxID(runtime)
+		data, err := runtime.CallAPITyped("GET", autoReplyImageDownloadURLPath(mailboxID, autoReplyImageFileKeys(runtime)), nil, nil)
+		if err != nil {
+			return mailDecorateProblemMessage(err, "get auto-reply image download URL failed")
+		}
+		runtime.Out(data, nil)
+		return nil
+	},
+}
+
 func autoReplyPath(mailboxID string) string {
 	return mailboxPath(mailboxID, "settings", "auto_reply")
+}
+
+func autoReplyImageDownloadURLPath(mailboxID string, fileKeys []string) string {
+	parts := make([]string, 0, len(fileKeys))
+	for _, fileKey := range fileKeys {
+		if fileKey = strings.TrimSpace(fileKey); fileKey != "" {
+			parts = append(parts, "file_keys="+url.QueryEscape(fileKey))
+		}
+	}
+	path := mailboxPath(mailboxID, "settings", "auto_reply", "images", "download_url")
+	if len(parts) == 0 {
+		return path
+	}
+	return path + "?" + strings.Join(parts, "&")
 }
 
 func resolveAutoReplyMailboxID(runtime *common.RuntimeContext) string {
@@ -144,6 +190,10 @@ func resolveAutoReplyMailboxID(runtime *common.RuntimeContext) string {
 		return mailbox
 	}
 	return "me"
+}
+
+func autoReplyImageFileKeys(runtime *common.RuntimeContext) []string {
+	return splitByComma(runtime.Str("file-keys"))
 }
 
 func autoReplyHasModify(runtime *common.RuntimeContext) bool {
@@ -657,7 +707,7 @@ func outputAutoReply(ctx context.Context, runtime *common.RuntimeContext, data m
 		autoReply["content"] = content
 		delete(autoReply, "content_html")
 	}
-	autoReply["images"] = hydrateAutoReplyImages(ctx, runtime, autoReply["images"])
+	autoReply["images"] = projectAutoReplyImages(autoReply["images"])
 	runtime.OutFormat(
 		map[string]interface{}{"auto_reply": autoReply},
 		&output.Meta{Count: 1},
@@ -688,7 +738,7 @@ func outputAutoReply(ctx context.Context, runtime *common.RuntimeContext, data m
 	return nil
 }
 
-func hydrateAutoReplyImages(ctx context.Context, runtime *common.RuntimeContext, raw interface{}) []interface{} {
+func projectAutoReplyImages(raw interface{}) []interface{} {
 	items, _ := raw.([]interface{})
 	result := make([]interface{}, 0, len(items))
 	for _, rawItem := range items {
@@ -698,35 +748,8 @@ func hydrateAutoReplyImages(ctx context.Context, runtime *common.RuntimeContext,
 		}
 		projected := make(map[string]interface{}, len(image)+1)
 		for key, value := range image {
-			if key != "file_key" && key != "download_url" {
+			if key != "download_url" {
 				projected[key] = value
-			}
-		}
-		fileKey, _ := image["file_key"].(string)
-		if fileKey == "" {
-			projected["error"] = "image file_key is missing"
-			result = append(result, projected)
-			continue
-		}
-		resp, err := runtime.DoAPIStream(ctx, &larkcore.ApiReq{
-			HttpMethod: "GET",
-			ApiPath:    fmt.Sprintf("/open-apis/drive/v1/medias/%s/download", validate.EncodePathSegment(fileKey)),
-		})
-		if err != nil {
-			projected["error"] = fmt.Sprintf("download image failed: %v", err)
-			result = append(result, projected)
-			continue
-		}
-		buf, readErr := io.ReadAll(io.LimitReader(resp.Body, int64(MaxAttachmentDownloadBytes)+1))
-		resp.Body.Close()
-		if readErr != nil {
-			projected["error"] = fmt.Sprintf("read image failed: %v", readErr)
-		} else if len(buf) > MaxAttachmentDownloadBytes {
-			projected["error"] = fmt.Sprintf("image exceeds %d MB download limit", MaxAttachmentDownloadBytes/1024/1024)
-		} else {
-			projected["data"] = base64.StdEncoding.EncodeToString(buf)
-			if _, ok := projected["content_type"]; !ok {
-				projected["content_type"] = resp.Header.Get("Content-Type")
 			}
 		}
 		result = append(result, projected)

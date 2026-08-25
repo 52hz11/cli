@@ -27,6 +27,9 @@ lark-cli mail +auto-reply-modify --as user --content @auto-reply.html
 # 正文中的本地图片会自动上传并改写为 cid 引用
 lark-cli mail +auto-reply-modify --as user --content '<p>休假中<img src="./logo.png"></p>'
 
+# 获取自动回复图片临时下载 URL
+lark-cli mail +auto-reply-image-download-url --as user --file-keys <file_key>
+
 # 关闭自动回复
 lark-cli mail +auto-reply-modify --as user --disable
 ```
@@ -45,6 +48,7 @@ lark-cli mail +auto-reply-modify --as user --disable
 | `--timezone <tz>` | modify | 否 | 时区，例如 `Asia/Shanghai` |
 | `--internal-only` | modify | 否 | 仅对租户内发件人发送自动回复；与 `--all` 互斥 |
 | `--all` | modify | 否 | 对所有发件人发送自动回复，包括外部发件人；与 `--internal-only` 互斥 |
+| `--file-keys <keys>` | image-download-url | 是 | `+auto-reply` 返回的图片 `file_key`，多个用逗号分隔 |
 
 ## 行为
 
@@ -52,7 +56,7 @@ lark-cli mail +auto-reply-modify --as user --disable
 - `+auto-reply-modify` 只更新用户提供的选项，未指定的配置会保留。
 - 修改正文时，本地图片上传后以 `cid:` 和 `images[]` 元信息保存，不会把 data URI 写入正文。
 - 写入限制：保存的正文最多 20000 字符，内联图片最多 250 张，内容总大小最多 25 MB。
-- 读取时会自动下载 `images[]` 中的图片并在每项的 `data` 字段返回 base64；单张下载失败只在该项返回 `error`，不影响其他图片。
+- 读取时只返回 `content` 中的 `cid:` 引用和 `images[]` 元信息；需要图片内容时，用 `+auto-reply-image-download-url` 获取临时下载 URL。
 - 修改需要 `mail:user_mailbox.message:readonly` 和 `mail:user_mailbox.message:modify`。
 - 写操作必须先向用户展示预览并取得明确确认。预览至少包含：`enabled`、时间范围、时区、收件范围和内容摘要。
 - 关闭自动回复也要确认，因为内容和时间配置可能仍会保留在设置中。
@@ -85,7 +89,7 @@ lark-cli mail +auto-reply-modify --as user --disable
 | `enabled` | 是否开启自动回复 |
 | `content` | 自动回复正文，可能是纯文本或 HTML；后端 `content_html` 在 CLI 输出层适配为此字段 |
 | `content_summary` | 自动回复摘要 |
-| `images` | 内联图片列表；包含 `cid`、`image_name`、`file_size`、`content_type` 和 base64 `data`，失败项包含 `error` |
+| `images` | 内联图片列表；包含 `cid`、`file_key`、`image_name`、`file_size`、`content_type` |
 | `start_time` | 毫秒级开始日期时间戳 |
 | `end_time` | 毫秒级结束日期时间戳 |
 | `time_zone` | 自动回复时间范围对应的时区 |
