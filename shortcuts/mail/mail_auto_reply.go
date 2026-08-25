@@ -497,7 +497,7 @@ func uploadAutoReplyLocalImages(ctx context.Context, runtime *common.RuntimeCont
 			uploaded[img.Path] = item
 			images = append(images, map[string]interface{}{
 				"cid": item.cid, "image_name": filepath.Base(img.Path), "file_key": item.fileKey,
-				"file_size": item.size, "content_type": item.mimeType,
+				"file_size": item.size, "header": item.mimeType,
 			})
 		}
 		content = replaceImgSrcOnce(content, img.RawSrc, "cid:"+item.cid)

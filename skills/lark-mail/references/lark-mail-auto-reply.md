@@ -89,7 +89,7 @@ lark-cli mail +auto-reply-modify --as user --disable
 | `enabled` | 是否开启自动回复 |
 | `content` | 自动回复正文，可能是纯文本或 HTML；后端 `content_html` 在 CLI 输出层适配为此字段 |
 | `content_summary` | 自动回复摘要 |
-| `images` | 内联图片列表；包含 `cid`、`file_key`、`image_name`、`file_size`、`content_type` |
+| `images` | 内联图片列表；包含 `cid`、`file_key`、`image_name`、`file_size`、`header` |
 | `start_time` | 毫秒级开始日期时间戳 |
 | `end_time` | 毫秒级结束日期时间戳 |
 | `time_zone` | 自动回复时间范围对应的时区 |
