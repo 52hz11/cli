@@ -20,9 +20,7 @@
 | `--presentation-decision` | 是 | 完整决策 JSON；接受内联 JSON、`@./decision.json` 形式的 CWD 下相对路径或 `-`（stdin）。 |
 
 ```bash
-lark-cli docs +script --command init-draft \
-  --presentation-decision '<完整 Presentation Decision JSON>' \
-  --format json
+lark-cli docs +script --command init-draft --presentation-decision '<完整 Presentation Decision JSON>' --format json
 ```
 
 `data` 的结构如下；实际随机段为 8 位十六进制字符：
@@ -36,6 +34,7 @@ lark-cli docs +script --command init-draft \
 ```
 
 - 在生成正文前执行；不要自行创建工作目录或决策文件。CLI 固定生成 `draft_<8位十六进制字符>_folder/draft.xml`，以返回的实际路径为准。
+- 内联参数始终先按标准 JSON 严格解析；仅当直接内联输入失败时，CLI 才按 Presentation Decision 结构恢复 Windows PowerShell 5.x 移除的字段名和标量双引号，再交回同一严格解析器。`@file` 与 stdin 不进入恢复。裸字符串包含 ASCII 逗号、花括号、方括号、反斜杠等歧义字符时无法无损恢复，按错误提示改用 `@./decision.json`。
 - 决策必须是单个 JSON 对象，包含 `audience`、`reader_task`、`genre_contract`、`adapter`、`presentation_mode` 和 `visual_plan`。`presentation_mode` 取 `formal|normal|rich`；`genre_contract`、`adapter` 使用固定短名、`"none"` 或 `null`。
 - `visual_plan` 包含非空 `reason` 和 `blocks` 数组；每项为 `{type,min_count,purpose}`，`type` 不重复，`min_count` 为正整数。按本 Skill 创建文档时，`blocks` 只对 `whiteboard`、`img`、`html5-block` 设置最低数量，其他表达按内容需要使用但不设数量约束；三类均无需约束时写 `[]`。CLI 为外部决策兼容 `type: "list"`，检查时将 `<ul>` 与 `<ol>` 的数量相加。仅有字数要求时添加 `word_count: {min,max}`；未指定的一侧写 `null`，至少一侧为正整数，且 `min <= max`。
 - 返回 `data.workspace`（已创建的随机工作区）、`data.draft_path`（可直接写入的 XML 路径）和英文操作提示 `data.tip`。工作区及其中的 `.presentation-decision.json` 已存在，但 XML 尚不存在；遵循提示直接使用文件创建/写入能力在 `draft_path` 写入完整 XML，首次写入前不要读取该路径。

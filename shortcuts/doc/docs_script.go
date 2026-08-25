@@ -35,7 +35,7 @@ const (
 	docsScriptDraftRandomHexLength  = 8
 	docsScriptDecisionFile          = ".presentation-decision.json"
 	docsScriptDraftTip              = "The workspace directory has been created successfully. draft_path points to a new XML file that does not exist yet. Create and write that UTF-8 file relative to the same working directory used for init-draft, and run parse and create from that same working directory. Do not pipe document text through a shell text command."
-	docsScriptDecisionShellHint     = "restore the original JSON quotes; if Windows PowerShell 5.x or another shell string layer removed them, save the original JSON as UTF-8 and pass --presentation-decision \"@./decision.json\""
+	docsScriptDecisionShellHint     = "restore the original JSON quotes; if shell quote loss made a string ambiguous, save the original JSON as UTF-8 and pass --presentation-decision \"@./decision.json\""
 	docsScriptListBlockType         = "list"
 	docsScriptAssessmentPassed      = "passed"
 	docsScriptAssessmentFailed      = "failed"
@@ -82,7 +82,7 @@ var DocsScript = common.Shortcut{
 		},
 		{
 			Name:  "presentation-decision",
-			Desc:  "Presentation Decision JSON required by init-draft and saved as the draft profile baseline; genre_contract and adapter accept a short name, \"none\", or null; must be valid UTF-8; @relative-file is recommended for agent workflows; also accepts inline JSON, including surrounding single quotes preserved by Windows command shims, or - for stdin",
+			Desc:  "Presentation Decision JSON required by init-draft and saved as the draft profile baseline; genre_contract and adapter accept a short name, \"none\", or null; must be valid UTF-8; @relative-file is recommended for agent workflows; direct inline input also recovers an intact outer single-quote pair or unambiguous schema fields and scalar values dequoted by Windows PowerShell 5.x; - reads stdin",
 			Input: []string{common.File, common.Stdin},
 		},
 	},
@@ -547,8 +547,8 @@ func parseDocsScriptPresentationDecisionFlag(runtime *common.RuntimeContext) (do
 		return decision, raw, err
 	}
 
-	// Keep the original strict parse as the primary path. Retry the same parser
-	// only for one intact transport quote pair preserved around direct input.
+	// Keep the original strict parse as the primary path. Recovery is limited to
+	// direct input because file and stdin sources preserve the original bytes.
 	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
 		raw = strings.TrimSpace(raw[1 : len(raw)-1])
 		decision, err = parseDocsScriptPresentationDecision(raw)
@@ -557,6 +557,14 @@ func parseDocsScriptPresentationDecisionFlag(runtime *common.RuntimeContext) (do
 		}
 	}
 	if docsScriptPresentationDecisionLooksShellMangled(raw) {
+		normalized, recoveryErr := recoverDocsScriptPresentationDecisionJSON(raw)
+		if recoveryErr == nil {
+			decision, err = parseDocsScriptPresentationDecision(normalized)
+			if err == nil {
+				return decision, normalized, nil
+			}
+			return docsScriptPresentationDecision{}, normalized, err
+		}
 		var validationErr *errs.ValidationError
 		if errors.As(err, &validationErr) {
 			err = validationErr.WithHint(docsScriptDecisionShellHint)
