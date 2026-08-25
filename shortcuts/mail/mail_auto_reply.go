@@ -469,8 +469,8 @@ func validateAutoReplyContentFilePath(path string) error {
 func uploadAutoReplyLocalImages(ctx context.Context, runtime *common.RuntimeContext, content string) (string, []map[string]interface{}, error) {
 	imgs := parseLocalImgs(content)
 	type uploadedImage struct {
-		cid, fileKey, mimeType string
-		size                   int64
+		cid, fileKey string
+		size         int64
 	}
 	uploaded := make(map[string]uploadedImage, len(imgs))
 	images := make([]map[string]interface{}, 0, len(imgs))
@@ -481,7 +481,7 @@ func uploadAutoReplyLocalImages(ctx context.Context, runtime *common.RuntimeCont
 			if err != nil {
 				return "", nil, err
 			}
-			mimeType, err := filecheck.CheckInlineImageFormat(filepath.Base(img.Path), buf)
+			_, err := filecheck.CheckInlineImageFormat(filepath.Base(img.Path), buf)
 			if err != nil {
 				return "", nil, mailValidationParamError("--content", "inline image %s: %v", img.Path, err).WithCause(err)
 			}
@@ -493,11 +493,11 @@ func uploadAutoReplyLocalImages(ctx context.Context, runtime *common.RuntimeCont
 			if err != nil {
 				return "", nil, err
 			}
-			item = uploadedImage{cid: cid, fileKey: fileKey, mimeType: mimeType, size: size}
+			item = uploadedImage{cid: cid, fileKey: fileKey, size: size}
 			uploaded[img.Path] = item
 			images = append(images, map[string]interface{}{
 				"cid": item.cid, "image_name": filepath.Base(img.Path), "file_key": item.fileKey,
-				"file_size": item.size, "header": item.mimeType,
+				"file_size": item.size,
 			})
 		}
 		content = replaceImgSrcOnce(content, img.RawSrc, "cid:"+item.cid)
