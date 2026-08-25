@@ -72,7 +72,7 @@ var DocsScript = common.Shortcut{
 		},
 		{
 			Name:  "content",
-			Desc:  "local XML content for parse; prefer a UTF-8 @relative-file under the command working directory; - reads stdin; mutually exclusive with --doc",
+			Desc:  "local XML content for parse; must be valid UTF-8; @relative-file under the command working directory is recommended for agent workflows; - reads stdin; mutually exclusive with --doc",
 			Input: []string{common.File, common.Stdin},
 		},
 		{
@@ -81,7 +81,7 @@ var DocsScript = common.Shortcut{
 		},
 		{
 			Name:  "presentation-decision",
-			Desc:  "Presentation Decision JSON required by init-draft and saved as the draft profile baseline; genre_contract and adapter accept a short name, \"none\", or null; prefer a UTF-8 @relative-file for agent workflows; also accepts inline JSON or - for stdin",
+			Desc:  "Presentation Decision JSON required by init-draft and saved as the draft profile baseline; genre_contract and adapter accept a short name, \"none\", or null; must be valid UTF-8; @relative-file is recommended for agent workflows; also accepts inline JSON or - for stdin",
 			Input: []string{common.File, common.Stdin},
 		},
 	},

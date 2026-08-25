@@ -88,7 +88,13 @@ func TestDocsScriptPresentationDecisionFlagAcceptsFileAndStdin(t *testing.T) {
 		if len(flag.Input) != 2 || flag.Input[0] != common.File || flag.Input[1] != common.Stdin {
 			t.Fatalf("presentation-decision Input = %#v, want file and stdin", flag.Input)
 		}
-		for _, want := range []string{"genre_contract and adapter", `"none"`, "or null"} {
+		for _, want := range []string{
+			"genre_contract and adapter",
+			`"none"`,
+			"or null",
+			"must be valid UTF-8",
+			"@relative-file is recommended for agent workflows",
+		} {
 			if !strings.Contains(flag.Desc, want) {
 				t.Fatalf("presentation-decision help = %q, want it to contain %q", flag.Desc, want)
 			}
