@@ -81,6 +81,7 @@ func TestVCMeetingEndDryRunE2E(t *testing.T) {
 	require.Empty(t, invalidMeetingID.Stdout)
 	require.Equal(t, "validation", gjson.Get(invalidMeetingID.Stderr, "error.type").String(), "stderr:\n%s", invalidMeetingID.Stderr)
 	require.Equal(t, "invalid_argument", gjson.Get(invalidMeetingID.Stderr, "error.subtype").String(), "stderr:\n%s", invalidMeetingID.Stderr)
+	require.Equal(t, "--meeting-id must be a positive base-10 int64", gjson.Get(invalidMeetingID.Stderr, "error.message").String(), "stderr:\n%s", invalidMeetingID.Stderr)
 	require.Equal(t, "--meeting-id", gjson.Get(invalidMeetingID.Stderr, "error.param").String(), "stderr:\n%s", invalidMeetingID.Stderr)
 
 	botDryRun, err := clie2e.RunCmd(ctx, clie2e.Request{
@@ -115,6 +116,7 @@ func TestVCMeetingEndDryRunE2E(t *testing.T) {
 		require.Empty(t, result.Stdout)
 		require.Equal(t, "validation", gjson.Get(result.Stderr, "error.type").String(), "stderr:\n%s", result.Stderr)
 		require.Equal(t, "invalid_argument", gjson.Get(result.Stderr, "error.subtype").String(), "stderr:\n%s", result.Stderr)
+		require.Equal(t, "--dry-run for +meeting-end requires explicit --as user or --as bot because offline preflight cannot resolve default or automatic identity", gjson.Get(result.Stderr, "error.message").String(), "stderr:\n%s", result.Stderr)
 		require.Equal(t, "--as", gjson.Get(result.Stderr, "error.param").String(), "stderr:\n%s", result.Stderr)
 	}
 }

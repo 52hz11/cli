@@ -88,18 +88,18 @@ func TestVCMeetingManagementDocsMatchAuthTypesAndContracts(t *testing.T) {
 	skill := readSkillDoc(t, "skills/lark-meeting/SKILL.md")
 
 	for _, cmd := range []struct {
-		name      string
-		authTypes []string
-		reference string
-		sceneNeed string
-		bot       bool
+		name         string
+		authTypes    []string
+		reference    string
+		botReference string
+		sceneNeed    string
 	}{
 		{
-			name:      "+meeting-end",
-			authTypes: VCMeetingEnd.AuthTypes,
-			reference: "lark-vc-meeting-end.md",
-			sceneNeed: "vc +meeting-end",
-			bot:       true,
+			name:         "+meeting-end",
+			authTypes:    VCMeetingEnd.AuthTypes,
+			reference:    "lark-vc-meeting-end.md",
+			botReference: "lark-vc-agent-meeting-end.md",
+			sceneNeed:    "vc +meeting-end",
 		},
 		{
 			name:      "+meeting-participant-kickout",
@@ -109,17 +109,28 @@ func TestVCMeetingManagementDocsMatchAuthTypesAndContracts(t *testing.T) {
 		},
 	} {
 		t.Run(cmd.name, func(t *testing.T) {
-			if !hasAuthType(cmd.authTypes, "user") || hasAuthType(cmd.authTypes, "bot") != cmd.bot {
-				t.Fatalf("%s AuthTypes = %v, want user support with bot=%v", cmd.name, cmd.authTypes, cmd.bot)
+			wantBot := cmd.botReference != ""
+			if !hasAuthType(cmd.authTypes, "user") || hasAuthType(cmd.authTypes, "bot") != wantBot {
+				t.Fatalf("%s AuthTypes = %v, want user support with bot=%v", cmd.name, cmd.authTypes, wantBot)
 			}
 			if !strings.Contains(skill, "references/"+cmd.reference) {
 				t.Fatalf("skills/lark-meeting/SKILL.md must link %s to %s", cmd.name, cmd.reference)
 			}
 
 			reference := readSkillDoc(t, "skills/lark-meeting/references/"+cmd.reference)
-			if cmd.bot {
-				if !strings.Contains(reference, "--as user") || !strings.Contains(reference, "--as bot") {
-					t.Fatalf("%s must document both identities for %s", cmd.reference, cmd.name)
+			if wantBot {
+				if !strings.Contains(reference, "--as user") || strings.Contains(reference, "--as bot") {
+					t.Fatalf("%s must document only the user identity for %s", cmd.reference, cmd.name)
+				}
+				if !strings.Contains(skill, "references/"+cmd.botReference) {
+					t.Fatalf("skills/lark-meeting/SKILL.md must link %s to %s", cmd.name, cmd.botReference)
+				}
+				if !strings.Contains(reference, "("+cmd.botReference+")") {
+					t.Fatalf("%s must link the bot identity reference %s", cmd.reference, cmd.botReference)
+				}
+				botReference := readSkillDoc(t, "skills/lark-meeting/references/"+cmd.botReference)
+				if !strings.Contains(botReference, "--as bot") {
+					t.Fatalf("%s must document bot identity support for %s", cmd.botReference, cmd.name)
 				}
 			} else if !strings.Contains(reference, "仅支持 `user` 身份") && !strings.Contains(reference, "必须显式使用 `--as user`") {
 				t.Fatalf("%s must state that %s is user-only", cmd.reference, cmd.name)

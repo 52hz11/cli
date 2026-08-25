@@ -59,6 +59,7 @@ func TestMeetingSkillOwnsVCReferences(t *testing.T) {
 			sharedName: "lark-vc-meeting-end.md",
 			oldName:    "",
 			command:    "lark-cli vc +meeting-end",
+			userOnly:   true,
 		},
 		{
 			sharedName: "lark-vc-meeting-participant-kickout.md",
