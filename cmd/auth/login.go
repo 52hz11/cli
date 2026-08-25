@@ -222,6 +222,18 @@ func authLoginRun(opts *LoginOptions, resolver domainResolver) error {
 	// endpoint rejects raw "a,b" strings as a single malformed scope.
 	finalScope := normalizeScopeInput(opts.Scope)
 
+	// excludeUniverse is the set --exclude is validated against: every scope the
+	// caller's selection legitimately covers. It deliberately keeps scopes that
+	// the batch-exclusion policy later withholds from the wire request (e.g.
+	// im:message.send_as_user), so `--domain im --exclude im:message.send_as_user`
+	// stays a valid no-op instead of erroring on a scope we silently removed.
+	// Seed it with --scope; domain/recommend scopes are added below, pre batch
+	// exclusion.
+	excludeUniverse := make(map[string]bool)
+	for _, s := range strings.Fields(finalScope) {
+		excludeUniverse[s] = true
+	}
+
 	// Resolve scopes from domain/permission filters and merge with --scope.
 	// --scope, --domain, and --recommend combine additively so callers can,
 	// for example, request all `docs` scopes plus a few specific `drive`
@@ -240,6 +252,17 @@ func authLoginRun(opts *LoginOptions, resolver domainResolver) error {
 			candidateScopes = registry.FilterAutoApproveScopes(candidateScopes)
 		}
 
+		// Record the selected universe (after recommend/common filtering, before
+		// batch exclusion) so --exclude may legitimately name a batch-withheld
+		// scope like im:message.send_as_user.
+		for _, s := range candidateScopes {
+			excludeUniverse[s] = true
+		}
+
+		// Withhold batch-excluded scopes (e.g. im:message.send_as_user) from the
+		// effective set; an explicit --scope re-adds them below.
+		candidateScopes = filterBatchExcludedScopes(candidateScopes)
+
 		if len(candidateScopes) == 0 && opts.Scope == "" {
 			return errs.NewValidationError(errs.SubtypeInvalidArgument, "no matching scopes found, check domain/scope options")
 		}
@@ -257,9 +280,11 @@ func authLoginRun(opts *LoginOptions, resolver domainResolver) error {
 
 	// Apply --exclude on top of the resolved scope set. We honour exclude
 	// regardless of whether scopes came from --scope, --domain, --recommend,
-	// or any combination thereof.
+	// or any combination thereof. Validation uses excludeUniverse (a superset of
+	// the effective finalScope) so excluding a batch-withheld scope is a no-op,
+	// not an error.
 	if len(opts.Exclude) > 0 {
-		excluded, unknown := applyExcludeScopes(finalScope, opts.Exclude)
+		excluded, unknown := applyExcludeScopes(finalScope, opts.Exclude, excludeUniverse)
 		if len(unknown) > 0 {
 			return errs.NewValidationError(errs.SubtypeInvalidArgument,
 				"these --exclude scopes are not present in the requested set: %s",
@@ -513,6 +538,28 @@ func findProfileByName(multi *core.MultiAppConfig, profileName string) *core.App
 	return nil
 }
 
+// batchExcludedScopes lists scopes deliberately withheld from the aggregate
+// batch sets that --domain / --recommend / bare `auth login` compute. In some
+// tenants im:message.send_as_user requires admin review even for a personal
+// assistant, so requesting it in bulk blocks users on approval. It stays
+// available through an explicit --scope and through the on-demand grant flow
+// when a command actually needs it.
+var batchExcludedScopes = map[string]bool{
+	"im:message.send_as_user": true,
+}
+
+// filterBatchExcludedScopes drops batchExcludedScopes entries from a
+// domain-derived scope slice, preserving order.
+func filterBatchExcludedScopes(scopes []string) []string {
+	out := scopes[:0:0]
+	for _, s := range scopes {
+		if !batchExcludedScopes[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // collectScopesForDomains collects API scopes (from from_meta projects) and
 // shortcut scopes for the given domain names.
 // Domains with auth_domain children are automatically expanded to include
@@ -718,16 +765,26 @@ func joinSortedScopeSet(set map[string]bool) string {
 	return strings.Join(out, " ")
 }
 
-// applyExcludeScopes removes the provided exclude entries from the requested
-// scope string. Each --exclude flag value may itself contain comma- or
-// whitespace-separated scopes. Returns the filtered scope string and any
-// exclude entries that were not present in the requested set (callers can
-// surface those as a validation error to catch typos like
-// `--exclude drive:file:downlod`).
-func applyExcludeScopes(requested string, excludes []string) (string, []string) {
+// applyExcludeScopes removes the provided exclude entries from requested (the
+// effective scope string that goes on the wire). Each --exclude flag value may
+// itself contain comma- or whitespace-separated scopes. It returns the filtered
+// scope string and any exclude entries that are "unknown".
+//
+// An exclude is unknown only when it is absent from validUniverse — the set of
+// scopes the caller's selection legitimately covers. validUniverse is a superset
+// of requested: it also carries scopes that the batch-exclusion policy withheld
+// from requested, so excluding such a scope (e.g. im:message.send_as_user under
+// --domain im) is a valid no-op rather than an error, while a genuine typo like
+// `--exclude drive:file:downlod` still surfaces as unknown. Pass validUniverse ==
+// nil to validate against requested itself (pure --scope path, where the two are
+// identical).
+func applyExcludeScopes(requested string, excludes []string, validUniverse map[string]bool) (string, []string) {
 	requestedSet := make(map[string]bool)
 	for _, s := range strings.Fields(requested) {
 		requestedSet[s] = true
+	}
+	if validUniverse == nil {
+		validUniverse = requestedSet
 	}
 
 	excludeSet := make(map[string]bool)
@@ -741,7 +798,7 @@ func applyExcludeScopes(requested string, excludes []string) (string, []string) 
 
 	var unknown []string
 	for s := range excludeSet {
-		if !requestedSet[s] {
+		if !validUniverse[s] {
 			unknown = append(unknown, s)
 		}
 	}

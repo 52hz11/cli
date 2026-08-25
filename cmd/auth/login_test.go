@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"reflect"
 	"slices"
 	"sort"
@@ -1568,5 +1569,163 @@ func TestGetDomainMetadata_ExcludesAuthDomainChildren(t *testing.T) {
 		if dm.Name == "whiteboard" {
 			t.Error("whiteboard should not appear in interactive domain list (has auth_domain=docs)")
 		}
+	}
+}
+
+func TestFilterBatchExcludedScopes(t *testing.T) {
+	got := filterBatchExcludedScopes([]string{"im:message", "im:message.send_as_user", "im:message:readonly"})
+	want := []string{"im:message", "im:message:readonly"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	clean := []string{"im:message", "calendar:calendar:read"}
+	if got := filterBatchExcludedScopes(clean); !slices.Equal(got, clean) {
+		t.Errorf("clean input changed: got %v, want %v", got, clean)
+	}
+	if got := filterBatchExcludedScopes(nil); len(got) != 0 {
+		t.Errorf("nil input: got %v, want empty", got)
+	}
+}
+
+func TestBatchExcludedScopes_ContainsSendAsUser(t *testing.T) {
+	if !batchExcludedScopes["im:message.send_as_user"] {
+		t.Fatal("batchExcludedScopes must contain im:message.send_as_user")
+	}
+}
+
+func TestFilterBatchExcludedScopes_OnImDomainSet(t *testing.T) {
+	raw := builtinResolver().scopesFor([]string{"im"}, "user", "")
+	if !slices.Contains(raw, "im:message.send_as_user") {
+		t.Fatal("precondition: im domain set must contain im:message.send_as_user (on-demand grant source intact)")
+	}
+	filtered := filterBatchExcludedScopes(raw)
+	if slices.Contains(filtered, "im:message.send_as_user") {
+		t.Error("filtered set must not contain im:message.send_as_user")
+	}
+	if !slices.Contains(filtered, "im:message") {
+		t.Error("filtered set should still contain im:message")
+	}
+}
+
+func TestAuthLoginRun_BatchExcludesSendAsUser(t *testing.T) {
+	// Isolate the requested-scope cache: --no-wait persists scopes under the
+	// config dir, so pin it to a temp dir to avoid touching the real one.
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
+
+	extractScope := func(body []byte) string {
+		v, _ := url.ParseQuery(string(body))
+		return v.Get("scope")
+	}
+	stubBody := map[string]interface{}{
+		"device_code": "dc", "user_code": "uc",
+		"verification_uri": "https://example.com/v", "verification_uri_complete": "https://example.com/v?c=1",
+		"expires_in": 240, "interval": 5,
+	}
+
+	// (a) --domain im must NOT request send_as_user in the batch set
+	f, _, _, reg := cmdutil.TestFactory(t, &core.CliConfig{
+		ProfileName: "default", AppID: "cli_test", AppSecret: "secret", Brand: core.BrandFeishu,
+	})
+	stub := &httpmock.Stub{Method: "POST", URL: larkauth.PathDeviceAuthorization, Body: stubBody}
+	reg.Register(stub)
+	if err := authLoginRun(&LoginOptions{
+		Factory: f, Ctx: context.Background(),
+		Domains: []string{"im"}, NoWait: true, JSON: true,
+	}, builtinResolver()); err != nil {
+		t.Fatalf("authLoginRun --domain im: %v", err)
+	}
+	scope := extractScope(stub.CapturedBody)
+	if strings.Contains(scope, "im:message.send_as_user") {
+		t.Errorf("--domain im requested send_as_user; scope=%q", scope)
+	}
+	if !strings.Contains(scope, "im:message") {
+		t.Errorf("--domain im missing im:message; scope=%q", scope)
+	}
+
+	// (b) explicit --scope re-adds it
+	f2, _, _, reg2 := cmdutil.TestFactory(t, &core.CliConfig{
+		ProfileName: "default", AppID: "cli_test", AppSecret: "secret", Brand: core.BrandFeishu,
+	})
+	stub2 := &httpmock.Stub{Method: "POST", URL: larkauth.PathDeviceAuthorization, Body: stubBody}
+	reg2.Register(stub2)
+	if err := authLoginRun(&LoginOptions{
+		Factory: f2, Ctx: context.Background(),
+		Domains: []string{"im"}, Scope: "im:message.send_as_user", NoWait: true, JSON: true,
+	}, builtinResolver()); err != nil {
+		t.Fatalf("authLoginRun --domain im --scope send_as_user: %v", err)
+	}
+	if scope2 := extractScope(stub2.CapturedBody); !strings.Contains(scope2, "im:message.send_as_user") {
+		t.Errorf("explicit --scope did not re-add send_as_user; scope=%q", scope2)
+	}
+}
+
+func TestAuthLoginRun_DomainExcludeSendAsUser(t *testing.T) {
+	// Regression (P1): `--domain im --exclude im:message.send_as_user` must keep
+	// succeeding as it did before the batch-exclusion filter existed. The batch
+	// filter drops send_as_user from the effective (wire) set, but --exclude is
+	// validated against the pre-filter selected universe, so naming it stays a
+	// valid no-op instead of an invalid_argument error. Automations relied on
+	// this exact form to dodge the send-as-user approval; do not break them.
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
+
+	stubBody := map[string]interface{}{
+		"device_code": "dc", "user_code": "uc",
+		"verification_uri": "https://example.com/v", "verification_uri_complete": "https://example.com/v?c=1",
+		"expires_in": 240, "interval": 5,
+	}
+	f, _, _, reg := cmdutil.TestFactory(t, &core.CliConfig{
+		ProfileName: "default", AppID: "cli_test", AppSecret: "secret", Brand: core.BrandFeishu,
+	})
+	stub := &httpmock.Stub{Method: "POST", URL: larkauth.PathDeviceAuthorization, Body: stubBody}
+	reg.Register(stub)
+	if err := authLoginRun(&LoginOptions{
+		Factory: f, Ctx: context.Background(),
+		Domains: []string{"im"}, Exclude: []string{"im:message.send_as_user"},
+		NoWait: true, JSON: true,
+	}, builtinResolver()); err != nil {
+		t.Fatalf("authLoginRun --domain im --exclude send_as_user: %v", err)
+	}
+	if stub.CapturedBody == nil {
+		t.Fatal("no device authorization request was sent (command errored before the wire call)")
+	}
+	v, _ := url.ParseQuery(string(stub.CapturedBody))
+	scope := v.Get("scope")
+	scopeSet := make(map[string]bool)
+	for _, s := range strings.Fields(scope) {
+		scopeSet[s] = true
+	}
+	if scopeSet["im:message.send_as_user"] {
+		t.Errorf("excluded scope leaked into wire request; scope=%q", scope)
+	}
+	if !scopeSet["im:message"] {
+		t.Errorf("--domain im missing exact im:message; scope=%q", scope)
+	}
+}
+
+func TestApplyExcludeScopes_ValidatesAgainstUniverse(t *testing.T) {
+	// Universe is a superset of the effective (requested) set: it carries a
+	// batch-withheld scope that is not on the wire.
+	universe := map[string]bool{"im:message": true, "im:message.send_as_user": true}
+
+	// (a) excluding a universe member absent from requested is a valid no-op.
+	got, unknown := applyExcludeScopes("im:message", []string{"im:message.send_as_user"}, universe)
+	if len(unknown) != 0 {
+		t.Fatalf("unexpected unknown: %v", unknown)
+	}
+	if got != "im:message" {
+		t.Errorf("requested changed: got %q, want %q", got, "im:message")
+	}
+
+	// (b) a scope outside the universe is still unknown (no typo widening).
+	if _, unknown := applyExcludeScopes("im:message", []string{"im:typo"}, universe); len(unknown) != 1 || unknown[0] != "im:typo" {
+		t.Errorf("expected unknown [im:typo], got %v", unknown)
+	}
+
+	// (c) nil universe validates against requested (pure --scope path unchanged).
+	if _, unknown := applyExcludeScopes("im:message", []string{"im:message.send_as_user"}, nil); len(unknown) != 1 || unknown[0] != "im:message.send_as_user" {
+		t.Errorf("nil universe should validate against requested; got unknown %v", unknown)
+	}
+	if kept, unknown := applyExcludeScopes("im:message calendar:calendar:read", []string{"im:message"}, nil); len(unknown) != 0 || kept != "calendar:calendar:read" {
+		t.Errorf("nil universe removal: kept=%q unknown=%v", kept, unknown)
 	}
 }
