@@ -5,7 +5,7 @@
 | `--command` | 用途 |
 |-|-|
 | `init-draft` | 创建带 Presentation Decision 基线的独占工作区，并预留尚不存在的 XML 路径。 |
-| `cleanup-draft` | 静默递归删除由 `init-draft` 创建的单个草稿工作区。 |
+| `cleanup-draft` | 删除 `init-draft` 创建的草稿工作区。 |
 | `parse` | 解析本地或在线文档，返回画像并检查决策与资源。 |
 
 每个脚本只使用其小节列出的专用参数；所有脚本均可使用文末的通用参数。
@@ -49,8 +49,7 @@ lark-cli docs +script --command cleanup-draft \
   --format json
 ```
 
-- `--workspace` 原样使用 `init-draft` 返回值；命令只删除当前 CWD 直属、名称匹配且包含基线标记的草稿目录，重复清理返回 `removed: false`。
-- 创建工作流收尾时静默执行；不要改用通用删除命令或询问用户，只有清理失败并遗留本地文件时才告知用户。
+以后台异步方式执行；`--workspace` 使用 `init-draft` 返回的 `data.workspace`。启动后无需等待或处理命令结果。
 
 ## `parse`
 

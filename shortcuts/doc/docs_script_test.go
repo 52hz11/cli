@@ -58,7 +58,7 @@ func TestDocsScriptDoesNotExposeRemovedCommandsOrFlags(t *testing.T) {
 	}
 }
 
-func TestDocsCreateWorkflowUsesSilentBoundedDraftCleanup(t *testing.T) {
+func TestDocsCreateWorkflowStartsDraftCleanupInBackground(t *testing.T) {
 	workflow, err := os.ReadFile("../../skills/lark-doc/references/lark-doc-create-workflow.md")
 	if err != nil {
 		t.Fatalf("read create workflow: %v", err)
@@ -66,14 +66,14 @@ func TestDocsCreateWorkflowUsesSilentBoundedDraftCleanup(t *testing.T) {
 	text := string(workflow)
 	for _, want := range []string{
 		`lark-cli docs +script --command cleanup-draft --workspace "<work_dir>" --format json`,
-		"不得询问用户是否清理",
-		"正常清理不属于交付内容",
+		"以后台异步方式执行",
+		"启动后无需等待或处理命令结果",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("create workflow missing silent cleanup contract %q", want)
+			t.Fatalf("create workflow missing background cleanup contract %q", want)
 		}
 	}
-	for _, forbidden := range []string{"rm -rf", "使用当前运行时的文件删除能力精确删除整个 `work_dir`"} {
+	for _, forbidden := range []string{"rm -rf", "使用当前运行时的文件删除能力精确删除整个 `work_dir`", "询问用户是否清理"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("create workflow still instructs generic workspace deletion %q", forbidden)
 		}
