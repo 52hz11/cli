@@ -595,6 +595,51 @@ func TestDocsScriptInitDraftDryRunDoesNotWrite(t *testing.T) {
 	require.Empty(t, entries)
 }
 
+func TestDocsScriptInitDraftAcceptsWindowsCommandShimQuotes(t *testing.T) {
+	workDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	decision := `{"audience":"reader","reader_task":"understand the topic","genre_contract":"none","adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"plain text is sufficient","blocks":[]}}`
+	result, err := clie2e.RunCmd(ctx, clie2e.Request{
+		Args: []string{
+			"docs", "+script",
+			"--command", "init-draft",
+			"--presentation-decision", "'" + decision + "'",
+			"--dry-run",
+		},
+		DefaultAs: "bot",
+		WorkDir:   workDir,
+		Env:       docsScriptE2EEnv(t),
+	})
+	require.NoError(t, err)
+	result.AssertExitCode(t, 0)
+	require.Equal(t, "init-draft", gjson.Get(result.Stdout, "data.command").String())
+	require.True(t, gjson.Get(result.Stdout, "data.presentation_decision").Bool())
+	entries, err := os.ReadDir(workDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestDocsScriptMangledPresentationDecisionSuggestsFileInput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	result, err := clie2e.RunCmd(ctx, clie2e.Request{
+		Args: []string{
+			"docs", "+script",
+			"--command", "init-draft",
+			"--presentation-decision", `{audience:reader,reader_task:understand}`,
+			"--dry-run",
+		},
+		DefaultAs: "bot",
+		WorkDir:   t.TempDir(),
+		Env:       docsScriptE2EEnv(t),
+	})
+	require.NoError(t, err)
+	result.AssertExitCode(t, 2)
+	require.Equal(t, "--presentation-decision", gjson.Get(result.Stderr, "error.param").String())
+	require.Equal(t, "restore the original JSON quotes; if Windows PowerShell 5.x or another shell string layer removed them, save the original JSON as UTF-8 and pass --presentation-decision \"@./decision.json\"", gjson.Get(result.Stderr, "error.hint").String())
+}
+
 func TestDocsScriptInitDraftRejectsNullWordCountWithOmitGuidance(t *testing.T) {
 	workDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

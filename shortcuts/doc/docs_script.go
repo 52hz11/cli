@@ -35,6 +35,7 @@ const (
 	docsScriptDraftRandomHexLength  = 8
 	docsScriptDecisionFile          = ".presentation-decision.json"
 	docsScriptDraftTip              = "The workspace directory has been created successfully. draft_path points to a new XML file that does not exist yet. Create and write that UTF-8 file relative to the same working directory used for init-draft, and run parse and create from that same working directory. Do not pipe document text through a shell text command."
+	docsScriptDecisionShellHint     = "restore the original JSON quotes; if Windows PowerShell 5.x or another shell string layer removed them, save the original JSON as UTF-8 and pass --presentation-decision \"@./decision.json\""
 	docsScriptListBlockType         = "list"
 	docsScriptAssessmentPassed      = "passed"
 	docsScriptAssessmentFailed      = "failed"
@@ -81,7 +82,7 @@ var DocsScript = common.Shortcut{
 		},
 		{
 			Name:  "presentation-decision",
-			Desc:  "Presentation Decision JSON required by init-draft and saved as the draft profile baseline; genre_contract and adapter accept a short name, \"none\", or null; must be valid UTF-8; @relative-file is recommended for agent workflows; also accepts inline JSON or - for stdin",
+			Desc:  "Presentation Decision JSON required by init-draft and saved as the draft profile baseline; genre_contract and adapter accept a short name, \"none\", or null; must be valid UTF-8; @relative-file is recommended for agent workflows; also accepts inline JSON, including surrounding single quotes preserved by Windows command shims, or - for stdin",
 			Input: []string{common.File, common.Stdin},
 		},
 	},
@@ -205,7 +206,7 @@ func validateDocsScript(_ context.Context, runtime *common.RuntimeContext) error
 	command := runtime.Str("command")
 	content := strings.TrimSpace(runtime.Str("content"))
 	doc := strings.TrimSpace(runtime.Str("doc"))
-	presentationDecision := strings.TrimSpace(runtime.Str("presentation-decision"))
+	presentationDecision := docsScriptPresentationDecisionInput(runtime)
 	workspace := strings.TrimSpace(runtime.Str("workspace"))
 	if command == docsScriptCleanupDraft {
 		switch {
@@ -238,6 +239,13 @@ func validateDocsScript(_ context.Context, runtime *common.RuntimeContext) error
 				"--presentation-decision is only supported with --command init-draft or parse").WithParam("--presentation-decision")
 		}
 		if _, err := parseDocsScriptPresentationDecision(presentationDecision); err != nil {
+			if !runtime.InputResolvedFromSource("presentation-decision") &&
+				docsScriptPresentationDecisionLooksShellMangled(presentationDecision) {
+				var validationErr *errs.ValidationError
+				if errors.As(err, &validationErr) {
+					return validationErr.WithHint(docsScriptDecisionShellHint)
+				}
+			}
 			return err
 		}
 	}
@@ -513,7 +521,7 @@ func docsScriptRemoteImageReason(message string, occurrence int) string {
 }
 
 func resolveDocsScriptPresentationDecision(runtime *common.RuntimeContext) (docsScriptPresentationDecision, bool, error) {
-	if rawDecision := strings.TrimSpace(runtime.Str("presentation-decision")); rawDecision != "" {
+	if rawDecision := docsScriptPresentationDecisionInput(runtime); rawDecision != "" {
 		decision, err := parseDocsScriptPresentationDecision(rawDecision)
 		return decision, err == nil, err
 	}
@@ -537,6 +545,17 @@ func resolveDocsScriptPresentationDecision(runtime *common.RuntimeContext) (docs
 			WithCause(err)
 	}
 	return decision, true, nil
+}
+
+func docsScriptPresentationDecisionInput(runtime *common.RuntimeContext) string {
+	raw := strings.TrimSpace(runtime.Str("presentation-decision"))
+	if runtime.InputResolvedFromSource("presentation-decision") {
+		return raw
+	}
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		return strings.TrimSpace(raw[1 : len(raw)-1])
+	}
+	return raw
 }
 
 func parseDocsScriptPresentationDecision(raw string) (docsScriptPresentationDecision, error) {
@@ -708,6 +727,15 @@ func parseDocsScriptPresentationDecision(raw string) (docsScriptPresentationDeci
 	return decision, nil
 }
 
+func docsScriptPresentationDecisionLooksShellMangled(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if len(raw) < 2 || raw[0] != '{' {
+		return false
+	}
+	body := strings.TrimSpace(raw[1:])
+	return body != "" && body[0] != '"' && body[0] != '}'
+}
+
 func normalizeDocsScriptOptionalRoute(field string, value *string) (*string, error) {
 	if value == nil {
 		return nil, nil
@@ -787,7 +815,7 @@ func initDocsScriptDraft(runtime *common.RuntimeContext) error {
 	if err != nil {
 		return err
 	}
-	rawDecision := strings.TrimSpace(runtime.Str("presentation-decision"))
+	rawDecision := docsScriptPresentationDecisionInput(runtime)
 	if err := workspace.savePresentationDecision(rawDecision); err != nil {
 		return workspace.fail(common.WrapSaveErrorTyped(err))
 	}

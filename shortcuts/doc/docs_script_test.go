@@ -94,6 +94,7 @@ func TestDocsScriptPresentationDecisionFlagAcceptsFileAndStdin(t *testing.T) {
 			"or null",
 			"must be valid UTF-8",
 			"@relative-file is recommended for agent workflows",
+			"surrounding single quotes",
 		} {
 			if !strings.Contains(flag.Desc, want) {
 				t.Fatalf("presentation-decision help = %q, want it to contain %q", flag.Desc, want)
@@ -415,6 +416,82 @@ func TestDocsScriptInitDraftPersistsDecisionForAutomaticParse(t *testing.T) {
 	}
 }
 
+func TestDocsScriptInitDraftNormalizesWindowsCommandShimQuotes(t *testing.T) {
+	workDir := t.TempDir()
+	withDocsWorkingDir(t, workDir)
+	f, stdout, _, _ := cmdutil.TestFactory(t, docsTestConfigWithAppID("docs-script-init-draft-shell-quotes"))
+	decision := `{"audience":"普通读者","reader_task":"复现实验","genre_contract":null,"adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"复现实验","blocks":[]}}`
+
+	err := mountAndRunDocs(t, DocsScript, []string{
+		"+script",
+		"--command", docsScriptInitDraft,
+		"--presentation-decision", "'" + decision + "'",
+		"--as", "bot",
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("initialize draft with Windows command-shim quotes: %v", err)
+	}
+
+	var initialized struct {
+		Data docsScriptDraftResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &initialized); err != nil {
+		t.Fatalf("decode init output: %v\n%s", err, stdout)
+	}
+	savedDecision, err := os.ReadFile(filepath.Join(initialized.Data.Workspace, docsScriptDecisionFile))
+	if err != nil {
+		t.Fatalf("read saved decision: %v", err)
+	}
+	if got := string(savedDecision); got != decision {
+		t.Fatalf("saved decision = %q, want normalized JSON %q", got, decision)
+	}
+}
+
+func TestDocsScriptPresentationDecisionFileRemainsStrictJSON(t *testing.T) {
+	workDir := t.TempDir()
+	withDocsWorkingDir(t, workDir)
+	if err := os.WriteFile("decision.json", []byte(`{audience:reader,reader_task:understand}`), 0o600); err != nil {
+		t.Fatalf("write decision: %v", err)
+	}
+	f, _, _, _ := cmdutil.TestFactory(t, docsTestConfigWithAppID("docs-script-decision-file-strict-json"))
+
+	err := mountAndRunDocs(t, DocsScript, []string{
+		"+script",
+		"--command", docsScriptInitDraft,
+		"--presentation-decision", "@./decision.json",
+		"--as", "bot",
+	}, f, nil)
+	assertValidationContract(t, err, errs.SubtypeInvalidArgument, "--presentation-decision")
+	problem, ok := errs.ProblemOf(err)
+	if !ok {
+		t.Fatalf("error does not expose a typed problem: %v", err)
+	}
+	if problem.Hint != "" {
+		t.Fatalf("hint = %q, want no shell-mangling guidance for strict @file JSON", problem.Hint)
+	}
+}
+
+func TestDocsScriptPresentationDecisionFileAcceptsUTF8BOM(t *testing.T) {
+	workDir := t.TempDir()
+	withDocsWorkingDir(t, workDir)
+	decision := `{"audience":"普通读者","reader_task":"复现实验","genre_contract":null,"adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"复现实验","blocks":[]}}`
+	if err := os.WriteFile("decision.json", []byte("\uFEFF"+decision), 0o600); err != nil {
+		t.Fatalf("write decision: %v", err)
+	}
+	f, stdout, _, _ := cmdutil.TestFactory(t, docsTestConfigWithAppID("docs-script-decision-file-bom"))
+
+	err := mountAndRunDocs(t, DocsScript, []string{
+		"+script",
+		"--command", docsScriptInitDraft,
+		"--presentation-decision", "@./decision.json",
+		"--dry-run",
+		"--as", "bot",
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("dry-run init with BOM-prefixed decision file: %v", err)
+	}
+}
+
 func TestDocsScriptInitDraftRequiresPresentationDecision(t *testing.T) {
 	workDir := t.TempDir()
 	withDocsWorkingDir(t, workDir)
@@ -616,6 +693,30 @@ func TestDocsScriptRejectsInvalidPresentationDecision(t *testing.T) {
 			}, f, nil)
 			assertValidationContract(t, err, errs.SubtypeInvalidArgument, "--presentation-decision")
 		})
+	}
+}
+
+func TestDocsScriptPresentationDecisionMangledInlineJSONSuggestsFileInput(t *testing.T) {
+	workDir := t.TempDir()
+	withDocsWorkingDir(t, workDir)
+	f, _, _, _ := cmdutil.TestFactory(t, docsTestConfigWithAppID("docs-script-presentation-shell-mangled"))
+	err := mountAndRunDocs(t, DocsScript, []string{
+		"+script",
+		"--command", docsScriptInitDraft,
+		"--presentation-decision", `{audience:reader,reader_task:understand}`,
+		"--as", "bot",
+	}, f, nil)
+	assertValidationContract(t, err, errs.SubtypeInvalidArgument, "--presentation-decision")
+	problem, ok := errs.ProblemOf(err)
+	if !ok {
+		t.Fatalf("error does not expose a typed problem: %v", err)
+	}
+	if got := problem.Hint; got != docsScriptDecisionShellHint {
+		t.Fatalf("hint = %q, want %q", got, docsScriptDecisionShellHint)
+	}
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) {
+		t.Fatalf("error = %T (%v), want preserved *json.SyntaxError cause", err, err)
 	}
 }
 
