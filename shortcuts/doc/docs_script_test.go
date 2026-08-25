@@ -447,6 +447,31 @@ func TestDocsScriptInitDraftNormalizesWindowsCommandShimQuotes(t *testing.T) {
 	}
 }
 
+func TestDocsScriptPresentationDecisionQuoteRecoveryUsesOriginalSchema(t *testing.T) {
+	workDir := t.TempDir()
+	withDocsWorkingDir(t, workDir)
+	f, _, _, _ := cmdutil.TestFactory(t, docsTestConfigWithAppID("docs-script-presentation-quote-schema"))
+	decision := `{"audience":"reader","reader_task":"understand","genre_contract":null,"adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"plain text is sufficient","blocks":[]},"unexpected":true}`
+
+	err := mountAndRunDocs(t, DocsScript, []string{
+		"+script",
+		"--command", docsScriptInitDraft,
+		"--presentation-decision", "'" + decision + "'",
+		"--as", "bot",
+	}, f, nil)
+	assertValidationContract(t, err, errs.SubtypeInvalidArgument, "--presentation-decision")
+	if !strings.Contains(err.Error(), `json: unknown field "unexpected"`) {
+		t.Fatalf("error = %v, want recovered JSON to use the original strict schema", err)
+	}
+	entries, readErr := os.ReadDir(workDir)
+	if readErr != nil {
+		t.Fatalf("read work directory: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed quote recovery created files: %#v", entries)
+	}
+}
+
 func TestDocsScriptPresentationDecisionFileRemainsStrictJSON(t *testing.T) {
 	workDir := t.TempDir()
 	withDocsWorkingDir(t, workDir)

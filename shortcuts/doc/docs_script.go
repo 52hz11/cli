@@ -206,7 +206,7 @@ func validateDocsScript(_ context.Context, runtime *common.RuntimeContext) error
 	command := runtime.Str("command")
 	content := strings.TrimSpace(runtime.Str("content"))
 	doc := strings.TrimSpace(runtime.Str("doc"))
-	presentationDecision := docsScriptPresentationDecisionInput(runtime)
+	presentationDecision := strings.TrimSpace(runtime.Str("presentation-decision"))
 	workspace := strings.TrimSpace(runtime.Str("workspace"))
 	if command == docsScriptCleanupDraft {
 		switch {
@@ -238,14 +238,7 @@ func validateDocsScript(_ context.Context, runtime *common.RuntimeContext) error
 			return errs.NewValidationError(errs.SubtypeInvalidArgument,
 				"--presentation-decision is only supported with --command init-draft or parse").WithParam("--presentation-decision")
 		}
-		if _, err := parseDocsScriptPresentationDecision(presentationDecision); err != nil {
-			if !runtime.InputResolvedFromSource("presentation-decision") &&
-				docsScriptPresentationDecisionLooksShellMangled(presentationDecision) {
-				var validationErr *errs.ValidationError
-				if errors.As(err, &validationErr) {
-					return validationErr.WithHint(docsScriptDecisionShellHint)
-				}
-			}
+		if _, _, err := parseDocsScriptPresentationDecisionFlag(runtime); err != nil {
 			return err
 		}
 	}
@@ -521,8 +514,8 @@ func docsScriptRemoteImageReason(message string, occurrence int) string {
 }
 
 func resolveDocsScriptPresentationDecision(runtime *common.RuntimeContext) (docsScriptPresentationDecision, bool, error) {
-	if rawDecision := docsScriptPresentationDecisionInput(runtime); rawDecision != "" {
-		decision, err := parseDocsScriptPresentationDecision(rawDecision)
+	if rawDecision := strings.TrimSpace(runtime.Str("presentation-decision")); rawDecision != "" {
+		decision, _, err := parseDocsScriptPresentationDecisionFlag(runtime)
 		return decision, err == nil, err
 	}
 	contentPath, ok := runtime.Cmd.Annotations[docsContentPathAnnotation]
@@ -547,15 +540,29 @@ func resolveDocsScriptPresentationDecision(runtime *common.RuntimeContext) (docs
 	return decision, true, nil
 }
 
-func docsScriptPresentationDecisionInput(runtime *common.RuntimeContext) string {
+func parseDocsScriptPresentationDecisionFlag(runtime *common.RuntimeContext) (docsScriptPresentationDecision, string, error) {
 	raw := strings.TrimSpace(runtime.Str("presentation-decision"))
-	if runtime.InputResolvedFromSource("presentation-decision") {
-		return raw
+	decision, err := parseDocsScriptPresentationDecision(raw)
+	if err == nil || runtime.InputResolvedFromSource("presentation-decision") {
+		return decision, raw, err
 	}
+
+	// Keep the original strict parse as the primary path. Retry the same parser
+	// only for one intact transport quote pair preserved around direct input.
 	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
-		return strings.TrimSpace(raw[1 : len(raw)-1])
+		raw = strings.TrimSpace(raw[1 : len(raw)-1])
+		decision, err = parseDocsScriptPresentationDecision(raw)
+		if err == nil {
+			return decision, raw, nil
+		}
 	}
-	return raw
+	if docsScriptPresentationDecisionLooksShellMangled(raw) {
+		var validationErr *errs.ValidationError
+		if errors.As(err, &validationErr) {
+			err = validationErr.WithHint(docsScriptDecisionShellHint)
+		}
+	}
+	return docsScriptPresentationDecision{}, raw, err
 }
 
 func parseDocsScriptPresentationDecision(raw string) (docsScriptPresentationDecision, error) {
@@ -811,11 +818,14 @@ func docsScriptBlockCount(blocks []docxparse.BlockShare, blockType string) int {
 }
 
 func initDocsScriptDraft(runtime *common.RuntimeContext) error {
+	_, rawDecision, err := parseDocsScriptPresentationDecisionFlag(runtime)
+	if err != nil {
+		return err
+	}
 	workspace, err := newDocsScriptWorkspace(runtime)
 	if err != nil {
 		return err
 	}
-	rawDecision := docsScriptPresentationDecisionInput(runtime)
 	if err := workspace.savePresentationDecision(rawDecision); err != nil {
 		return workspace.fail(common.WrapSaveErrorTyped(err))
 	}
