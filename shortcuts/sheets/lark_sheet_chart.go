@@ -167,7 +167,10 @@ var ChartConfigUpdate = common.Shortcut{
 	AuthTypes:   []string{"user", "bot"},
 	HasFormat:   true,
 	Flags:       flagsFor("+chart-config-update"),
-	PostMount:   configureChartSemanticCommand,
+	Tips: []string{
+		"--dry-run validates the request shape only; execution reads the current chart snapshot, so X-axis bounds can still be rejected unless the existing bottom X axis is continuous (valueType=linear).",
+	},
+	PostMount: configureChartSemanticCommand,
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
 		token, err := resolveSpreadsheetToken(runtime)
 		if err != nil {

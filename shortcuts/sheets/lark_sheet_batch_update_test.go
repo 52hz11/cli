@@ -892,6 +892,24 @@ func TestBatchUpdate_IgnoredLocatorWarns(t *testing.T) {
 	}
 }
 
+func TestBatchUpdate_CombinesLocatorAndDimInsertWarnings(t *testing.T) {
+	t.Parallel()
+
+	warning := dryRunWarning(t, BatchUpdate, []string{
+		"--url", testURL,
+		"--operations", `[{"shortcut":"+dim-insert","input":{"sheet_id":"sh1","position":1,"count":1,"inherit_style":"before","url":"https://example.invalid/sheets/shtWRONG"}}]`,
+		"--yes",
+	})
+	for _, want := range []string{
+		"ignored input locator keys url",
+		dimInsertBeforeStyleWarning,
+	} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("combined warning should contain %q, got %q", want, warning)
+		}
+	}
+}
+
 // TestBatchOpAliasCollidesWithTarget pins the message for a sub-op carrying
 // BOTH an intuitive alias and the flag it aliases. The key is recognized, so
 // reporting it as "unknown input key" (which it did, because keys are walked

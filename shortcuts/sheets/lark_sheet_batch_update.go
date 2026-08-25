@@ -81,9 +81,6 @@ var BatchUpdate = common.Shortcut{
 		if warnings := batchWarnings(runtime); len(warnings) > 0 {
 			dr.Set("warning_message", strings.Join(warnings, "\n"))
 		}
-		if batchNeedsDimInsertBeforeStyleWarning(runtime) {
-			dr.Set("warning_message", dimInsertBeforeStyleWarning)
-		}
 		return dr
 	},
 	Execute: func(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -157,6 +154,9 @@ var BatchChartCreate = common.Shortcut{
 		if len(plan.localFailures) > 0 {
 			dryRun.Set("local_validation_failures", plan.localFailures)
 		}
+		if warnings := batchIgnoredLocatorNotes(runtime, "+batch-chart-create"); len(warnings) > 0 {
+			dryRun.Set("warning_message", strings.Join(warnings, "\n"))
+		}
 		return dryRun
 	},
 	Execute: func(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -167,6 +167,9 @@ var BatchChartCreate = common.Shortcut{
 		plan, err := buildChartBatchPlan(runtime, token, chartCreateBatchDispatch, "+batch-chart-create")
 		if err != nil {
 			return err
+		}
+		for _, warning := range batchIgnoredLocatorNotes(runtime, "+batch-chart-create") {
+			fmt.Fprintln(runtime.IO().ErrOut, warning)
 		}
 		out, err := callTool(ctx, runtime, token, ToolKindWrite, "batch_update", plan.input)
 		if err != nil {
@@ -205,6 +208,9 @@ var BatchChartUpdate = common.Shortcut{
 		if len(plan.localFailures) > 0 {
 			dryRun.Set("local_validation_failures", plan.localFailures)
 		}
+		if warnings := batchIgnoredLocatorNotes(runtime, "+batch-chart-update"); len(warnings) > 0 {
+			dryRun.Set("warning_message", strings.Join(warnings, "\n"))
+		}
 		return dryRun
 	},
 	Execute: func(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -218,6 +224,9 @@ var BatchChartUpdate = common.Shortcut{
 		}
 		if err := prepareBatchChartUpdates(ctx, runtime, token, plan); err != nil {
 			return err
+		}
+		for _, warning := range batchIgnoredLocatorNotes(runtime, "+batch-chart-update") {
+			fmt.Fprintln(runtime.IO().ErrOut, warning)
 		}
 		out, err := callTool(ctx, runtime, token, ToolKindWrite, "batch_update", plan.input)
 		if err != nil {
@@ -648,7 +657,7 @@ func batchResultCount(value interface{}) int {
 // report.
 func batchWarnings(runtime *common.RuntimeContext) []string {
 	var out []string
-	out = append(out, batchIgnoredLocatorNotes(runtime)...)
+	out = append(out, batchIgnoredLocatorNotes(runtime, "+batch-update")...)
 	if batchNeedsDimInsertBeforeStyleWarning(runtime) {
 		out = append(out, dimInsertBeforeStyleWarning)
 	}
@@ -659,10 +668,16 @@ func batchWarnings(runtime *common.RuntimeContext) []string {
 // batchIgnoredLocatorNotes makes the translator's intentional locator rewrite
 // visible. Without this note, a caller can pass a different spreadsheet in a
 // sub-op and mistake the ignored value for the actual target.
-func batchIgnoredLocatorNotes(runtime *common.RuntimeContext) []string {
+func batchIgnoredLocatorNotes(runtime *common.RuntimeContext, command string) []string {
 	rawOps, err := parseBatchOperationsFlag(runtime)
 	if err != nil {
 		return nil // a malformed --operations is the translator's to report.
+	}
+	if command == "+batch-chart-create" {
+		rawOps, err = normalizeChartCreateBatchOperations(rawOps)
+		if err != nil {
+			return nil // a malformed --operations is the translator's to report.
+		}
 	}
 	var notes []string
 	for i, raw := range rawOps {
@@ -686,8 +701,8 @@ func batchIgnoredLocatorNotes(runtime *common.RuntimeContext) []string {
 		sort.Strings(ignored)
 		shortcut, _ := op["shortcut"].(string)
 		notes = append(notes, fmt.Sprintf(
-			"warning: operations[%d] (%s) ignored input locator keys %s; the top-level +batch-update --url/--spreadsheet-token locator is authoritative",
-			i, shortcut, strings.Join(ignored, ", ")))
+			"warning: operations[%d] (%s) ignored input locator keys %s; the top-level %s --url/--spreadsheet-token locator is authoritative",
+			i, shortcut, strings.Join(ignored, ", "), command))
 	}
 	return notes
 }

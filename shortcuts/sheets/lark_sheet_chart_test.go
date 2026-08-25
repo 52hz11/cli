@@ -297,6 +297,57 @@ func TestBatchChartCreate_LegacyWrappedInputStillAccepted(t *testing.T) {
 	}
 }
 
+func TestChartBatches_IgnoredLocatorWarns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		shortcut common.Shortcut
+		command  string
+		ops      string
+	}{
+		{
+			name:     "create flat operation",
+			shortcut: BatchChartCreate,
+			command:  "+batch-chart-create",
+			ops:      `[{"sheet_id":"sh1","chart_type":"line","data_range":"A1:C10","url":"https://example.invalid/sheets/shtWRONG"}]`,
+		},
+		{
+			name:     "update wrapped operation",
+			shortcut: BatchChartUpdate,
+			command:  "+batch-chart-update",
+			ops:      `[{"shortcut":"+chart-config-update","input":{"sheet_id":"sh1","chart_id":"chart-1","title":"Sales","spreadsheet_token":"shtWRONG"}}]`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			warning := dryRunWarning(t, tc.shortcut, []string{
+				"--url", testURL,
+				"--operations", tc.ops,
+			})
+			for _, want := range []string{"operations[0]", tc.command + " --url/--spreadsheet-token locator is authoritative"} {
+				if !strings.Contains(warning, want) {
+					t.Errorf("locator warning should contain %q, got %q", want, warning)
+				}
+			}
+		})
+	}
+}
+
+func TestChartConfigUpdate_TipsDescribeSnapshotValidation(t *testing.T) {
+	t.Parallel()
+
+	tips := strings.Join(ChartConfigUpdate.Tips, "\n")
+	for _, want := range []string{"--dry-run validates the request shape only", "valueType=linear"} {
+		if !strings.Contains(tips, want) {
+			t.Errorf("tips should contain %q, got %q", want, tips)
+		}
+	}
+}
+
 func TestChartConfigUpdate_PartialFields(t *testing.T) {
 	t.Parallel()
 	body := parseDryRunBody(t, ChartConfigUpdate, []string{
