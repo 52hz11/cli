@@ -336,6 +336,40 @@ func TestChartBatches_IgnoredLocatorWarns(t *testing.T) {
 	}
 }
 
+func TestChartBatches_RejectDuplicateUpdateTargets(t *testing.T) {
+	t.Parallel()
+
+	operations := `[
+		{"shortcut":"+chart-config-update","input":{"sheet_id":"sh1","chart_id":"chart-1","title":"Sales"}},
+		{"shortcut":"+chart-data-update","input":{"sheet_id":"sh1","chart_id":"chart-1","data_range":"A1:C10"}}
+	]`
+	for _, tc := range []struct {
+		name     string
+		shortcut common.Shortcut
+		args     []string
+	}{
+		{
+			name:     "dedicated chart batch",
+			shortcut: BatchChartUpdate,
+			args:     []string{"--url", testURL, "--operations", operations},
+		},
+		{
+			name:     "general batch",
+			shortcut: BatchUpdate,
+			args:     []string{"--url", testURL, "--operations", operations, "--yes"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := runShortcutCapturingErr(t, tc.shortcut, append(tc.args, "--dry-run"))
+			requireValidation(t, err, "both target chart \"chart-1\"")
+			if !strings.Contains(err.Error(), "separate batch calls") {
+				t.Fatalf("duplicate-target error is not actionable: %v", err)
+			}
+		})
+	}
+}
+
 func TestChartConfigUpdate_TipsDescribeSnapshotValidation(t *testing.T) {
 	t.Parallel()
 
@@ -544,6 +578,34 @@ func TestChartSemanticShortcuts_CompatibleAliases(t *testing.T) {
 		axes[1].(map[string]interface{})["title"].(map[string]interface{})["text"] != "Revenue" ||
 		labels["value"] != true || labels["percentage"] != true {
 		t.Fatalf("chart config aliases = %#v", snapshot)
+	}
+}
+
+func TestChartSemanticShortcuts_StackedFalseDisablesStacking(t *testing.T) {
+	t.Parallel()
+
+	body := parseDryRunBody(t, ChartConfigUpdate, []string{
+		"--url", testURL,
+		"--sheet-id", testSheetID,
+		"--chart-id", "chart-1",
+		"--stacked=false",
+	})
+	plot := chartDryRunSnapshot(t, decodeToolInput(t, body, "manage_chart_object"))["plotArea"].(map[string]interface{})["plot"].(map[string]interface{})
+	stack := plot["extra"].(map[string]interface{})["stack"].(map[string]interface{})
+	if stack["enabled"] != false {
+		t.Fatalf("--stacked=false stack = %#v, want enabled=false", stack)
+	}
+
+	body = parseDryRunBody(t, BatchChartUpdate, []string{
+		"--url", testURL,
+		"--operations", `[{"shortcut":"+chart-config-update","input":{"sheet_id":"sh1","chart_id":"chart-1","stacked":false}}]`,
+	})
+	input := decodeToolInput(t, body, "batch_update")
+	operation := input["operations"].([]interface{})[0].(map[string]interface{})
+	plot = chartDryRunSnapshot(t, operation["input"].(map[string]interface{}))["plotArea"].(map[string]interface{})["plot"].(map[string]interface{})
+	stack = plot["extra"].(map[string]interface{})["stack"].(map[string]interface{})
+	if stack["enabled"] != false {
+		t.Fatalf("batch stacked=false stack = %#v, want enabled=false", stack)
 	}
 }
 
@@ -957,6 +1019,39 @@ func TestChartDataUpdate_ExplicitDirectionAndMultipleRanges(t *testing.T) {
 	if refs[0].(map[string]interface{})["value"] != "'Sheet1'!A1:A10" ||
 		refs[1].(map[string]interface{})["value"] != "'Sheet2'!A1:B10" {
 		t.Errorf("cross-sheet refs = %#v, want %q", refs, dataRange)
+	}
+}
+
+func TestChartDataUpdate_NormalizationNoticeOnlyWhenRangesMerge(t *testing.T) {
+	t.Parallel()
+
+	snapshot := map[string]interface{}{
+		"plotArea": map[string]interface{}{"plot": map[string]interface{}{"type": "line"}},
+	}
+	for _, tc := range []struct {
+		name       string
+		dataRange  string
+		wantNotice bool
+	}{
+		{name: "spacing only", dataRange: "A1:B10, D1:E10", wantNotice: false},
+		{name: "unaligned ranges", dataRange: "A1:B10,C2:D10", wantNotice: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fv := newMapFlagViewForCommand("+chart-data-update", map[string]interface{}{
+				"sheet_id":       "sh1",
+				"chart_id":       "chart-1",
+				"data_range":     tc.dataRange,
+				"data_direction": "column",
+			})
+			_, _, _, notice, err := chartDataUpdateInputFromSnapshot(fv, testToken, "sh1", "", snapshot)
+			if err != nil {
+				t.Fatalf("chart data update input failed: %v", err)
+			}
+			if got := notice != ""; got != tc.wantNotice {
+				t.Fatalf("notice = %q, want present=%t", notice, tc.wantNotice)
+			}
+		})
 	}
 }
 

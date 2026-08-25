@@ -301,7 +301,7 @@ func chartCreateBasicInput(rt flagView, token, sheetID, sheetName string) (map[s
 	if direction == "" {
 		direction = "column"
 	}
-	normalizedDataRange, dimensionCount, dataPointCount, err := normalizeBasicChartDataRanges(dataRange, direction)
+	normalizedDataRange, dimensionCount, dataPointCount, _, err := normalizeBasicChartDataRanges(dataRange, direction)
 	if err != nil {
 		return nil, err
 	}
@@ -710,7 +710,7 @@ func chartDataUpdateInputFromSnapshot(
 		direction = rt.Str("data-direction")
 	}
 	dataRange := strings.TrimSpace(rt.Str("data-range"))
-	normalized, dimensionCount, _, err := normalizeBasicChartDataRanges(dataRange, direction)
+	normalized, dimensionCount, _, merged, err := normalizeBasicChartDataRanges(dataRange, direction)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
@@ -862,7 +862,7 @@ func chartDataUpdateInputFromSnapshot(
 		return nil, nil, nil, "", err
 	}
 	notice := ""
-	if normalized != dataRange {
+	if merged {
 		notice = "Multiple data ranges were not aligned and were merged into the smallest enclosing rectangular range; review normalized_data_ranges before continuing."
 	}
 	return input, data, rangeValues, notice, nil
@@ -875,7 +875,7 @@ func chartDataDryRunPatch(updates map[string]interface{}) map[string]interface{}
 	if direction == "" {
 		direction = "column"
 	}
-	normalized, dimensionCount, _, _ := normalizeBasicChartDataRanges(dataRange, direction)
+	normalized, dimensionCount, _, _, _ := normalizeBasicChartDataRanges(dataRange, direction)
 	if dataRange != "" {
 		ranges, _ := splitChartDataRanges(normalized)
 		refs := make([]interface{}, 0, len(ranges))
@@ -1451,16 +1451,16 @@ type chartDataRange struct {
 	rowCount, colCount int
 }
 
-func normalizeBasicChartDataRanges(dataRange, direction string) (normalized string, dimensionCount, dataPointCount int, err error) {
+func normalizeBasicChartDataRanges(dataRange, direction string) (normalized string, dimensionCount, dataPointCount int, merged bool, err error) {
 	ranges, err := splitChartDataRanges(dataRange)
 	if err != nil {
-		return "", 0, 0, sheetsValidationForFlag("data-range", "invalid --data-range %q: %v", dataRange, err)
+		return "", 0, 0, false, sheetsValidationForFlag("data-range", "invalid --data-range %q: %v", dataRange, err)
 	}
 	parsed := make([]chartDataRange, 0, len(ranges))
 	for _, value := range ranges {
 		item, parseErr := parseChartDataRange(value)
 		if parseErr != nil {
-			return "", 0, 0, sheetsValidationForFlag("data-range", "invalid --data-range item %q: %v", value, parseErr)
+			return "", 0, 0, false, sheetsValidationForFlag("data-range", "invalid --data-range item %q: %v", value, parseErr)
 		}
 		parsed = append(parsed, item)
 	}
@@ -1501,7 +1501,7 @@ func normalizeBasicChartDataRanges(dataRange, direction string) (normalized stri
 	normalized = strings.Join(ranges, ",")
 	if len(ranges) > 1 && (!aligned || overlapping) {
 		if len(spansBySheet) > 1 {
-			return "", 0, 0, sheetsValidationForFlag(
+			return "", 0, 0, false, sheetsValidationForFlag(
 				"data-range",
 				"cross-sheet --data-range items must align along the data-point axis and must not overlap within the same sheet",
 			)
@@ -1516,14 +1516,14 @@ func normalizeBasicChartDataRanges(dataRange, direction string) (normalized stri
 		if direction == "row" {
 			dimensionCount, dataPointCount = dataPointCount, dimensionCount
 		}
-		return normalized, dimensionCount, dataPointCount, nil
+		return normalized, dimensionCount, dataPointCount, true, nil
 	}
 	if direction == "row" {
 		dataPointCount = first.colCount
 	} else {
 		dataPointCount = first.rowCount
 	}
-	return normalized, dimensionCount, dataPointCount, nil
+	return normalized, dimensionCount, dataPointCount, false, nil
 }
 
 func splitChartDataRanges(value string) ([]string, error) {
@@ -1610,7 +1610,11 @@ func addChartSemanticConfig(rt flagView, out map[string]interface{}) {
 		}
 	}
 	if rt.Changed("stacked") {
-		out["stack"] = "normal"
+		if rt.Bool("stacked") {
+			out["stack"] = "normal"
+		} else {
+			out["stack"] = "none"
+		}
 	}
 	if rt.Changed("smooth") {
 		out["smooth"] = rt.Bool("smooth")

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/larksuite/cli/shortcuts/common"
@@ -309,7 +310,7 @@ func buildChartBatchPlan(
 			Error:    failure.Err.Error(),
 		})
 	}
-	return &batchUpdatePlan{
+	plan := &batchUpdatePlan{
 		input: map[string]interface{}{
 			"excel_id":          token,
 			"operations":        translated,
@@ -319,7 +320,11 @@ func buildChartBatchPlan(
 		normalizedOperations: normalizedBatchOperations(rawOps, originalIndexes),
 		localFailures:        localFailures,
 		total:                len(rawOps),
-	}, nil
+	}
+	if err := rejectDuplicateBatchChartTargets(plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
 }
 
 func normalizeChartCreateBatchOperations(rawOps []interface{}) ([]interface{}, error) {
@@ -538,13 +543,57 @@ func buildBatchUpdatePlan(runtime *common.RuntimeContext, token string) (*batchU
 			Error:    failure.Err.Error(),
 		})
 	}
-	return &batchUpdatePlan{
+	plan := &batchUpdatePlan{
 		input:                input,
 		originalIndexes:      originalIndexes,
 		normalizedOperations: normalizedBatchOperations(rawOps, originalIndexes),
 		localFailures:        localFailures,
 		total:                len(rawOps),
-	}, nil
+	}
+	if err := rejectDuplicateBatchChartTargets(plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func rejectDuplicateBatchChartTargets(plan *batchUpdatePlan) error {
+	type seenTarget struct {
+		index int
+		label string
+	}
+	seen := make(map[string]seenTarget)
+	for remoteIndex, operation := range plan.normalizedOperations {
+		if operation.shortcut != "+chart-config-update" && operation.shortcut != "+chart-data-update" {
+			continue
+		}
+		fv := newMapFlagViewForCommand(operation.shortcut, operation.input)
+		chartID := strings.TrimSpace(fv.Str("chart-id"))
+		sheetID := strings.TrimSpace(fv.Str("sheet-id"))
+		sheetName := strings.TrimSpace(fv.Str("sheet-name"))
+		if chartID == "" || (sheetID == "" && sheetName == "") {
+			continue // The operation translator reports missing required fields.
+		}
+		selectorKey := "id:" + sheetID
+		selectorLabel := "sheet-id " + strconv.Quote(sheetID)
+		if sheetID == "" {
+			selectorKey = "name:" + sheetName
+			selectorLabel = "sheet-name " + strconv.Quote(sheetName)
+		}
+		key := selectorKey + "\x00" + chartID
+		originalIndex := plan.originalIndexes[remoteIndex]
+		if previous, ok := seen[key]; ok {
+			return sheetsValidationForFlag(
+				"operations",
+				"operations[%d] and operations[%d] both target chart %q on %s; send duplicate chart targets in separate batch calls so each update reads the latest snapshot",
+				previous.index,
+				originalIndex,
+				chartID,
+				previous.label,
+			)
+		}
+		seen[key] = seenTarget{index: originalIndex, label: selectorLabel}
+	}
+	return nil
 }
 
 func batchContinueOnError(runtime *common.RuntimeContext) bool {
