@@ -559,7 +559,12 @@ func parseFormLotteryPayload(value string) (*formLotteryPayload, error) {
 	if err := json.Unmarshal([]byte(value), &fields); err != nil {
 		return nil, baseFlagErrorf("--config-json must be a valid lottery JSON object: %v", err)
 	}
-	_, lottery.AwardsSet = fields["awards"]
+	for field := range fields {
+		if strings.EqualFold(field, "awards") {
+			lottery.AwardsSet = true
+			break
+		}
+	}
 	return lottery, nil
 }
 
