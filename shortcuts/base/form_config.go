@@ -6,6 +6,7 @@ package base
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -352,6 +353,13 @@ func changedFormSubmissionGroups(runtime *common.RuntimeContext) []string {
 }
 
 func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]interface{}, error) {
+	notificationType := runtime.Str("type")
+	switch notificationType {
+	case "on-submission", "scheduled":
+	default:
+		return nil, baseFlagErrorf("--type must be on-submission or scheduled")
+	}
+
 	enabled := runtime.Bool("enabled")
 	body := map[string]interface{}{}
 	if runtime.Changed("locale") {
@@ -366,7 +374,7 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 	if enabled && len(receivers) == 0 {
 		return nil, baseFlagErrorf("at least one --receiver-open-id is required when notification is enabled")
 	}
-	if runtime.Str("type") == "scheduled" {
+	if notificationType == "scheduled" {
 		if enabled {
 			if runtime.Str("notify-time") == "" {
 				return nil, baseFlagErrorf("--notify-time is required when scheduled notification is enabled")
@@ -379,6 +387,9 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 			}
 			if err := validateRFC3339Flag("notify-time", runtime.Str("notify-time")); err != nil {
 				return nil, err
+			}
+			if _, err := time.LoadLocation(runtime.Str("timezone")); err != nil {
+				return nil, baseFlagErrorf("--timezone must be a valid IANA timezone: %v", err)
 			}
 			group["receivers"] = receivers
 			group["notify_time"] = runtime.Str("notify-time")
@@ -474,18 +485,15 @@ func buildFormLotteryActionBody(runtime *common.RuntimeContext) (map[string]inte
 		}
 	}
 	if config != "" {
-		lottery, err := parseJSONObjectFlag("config-json", config)
+		lottery, err := parseFormLotteryPayload(config)
 		if err != nil {
 			return nil, err
 		}
-		if containsKey(lottery, "icon_token") {
-			return nil, baseFlagErrorf("--config-json must not contain icon_token")
-		}
-		if action == "relink-winning-table" && containsKey(lottery, "awards") {
+		if action == "relink-winning-table" && lottery.Awards != nil {
 			return nil, baseFlagErrorf("--config-json must not contain awards for relink-winning-table action")
 		}
 		if action == "update" {
-			if _, ok := lottery["version"]; !ok {
+			if lottery.Version == nil {
 				return nil, baseFlagErrorf("--config-json.version is required for update action")
 			}
 		}
@@ -512,52 +520,78 @@ func formNotificationReceivers(openIDs []string) ([]interface{}, error) {
 	return receivers, nil
 }
 
-func validateLotteryConfig(lottery map[string]interface{}, requireVersion bool) error {
+type formLotteryPayload struct {
+	Version      *int64                          `json:"version,omitempty"`
+	Probability  *int64                          `json:"probability,omitempty"`
+	AwarderInfo  *formLotteryAwarderPayload      `json:"awarder_info,omitempty"`
+	Awards       *[]formLotteryAwardPayload      `json:"awards,omitempty"`
+	WinningTable *formLotteryWinningTablePayload `json:"winning_table,omitempty"`
+}
+
+type formLotteryAwarderPayload struct {
+	Name             string  `json:"name"`
+	ContactInfo      string  `json:"contact_info"`
+	AwardDeliveryWay *string `json:"award_delivery_way,omitempty"`
+}
+
+type formLotteryAwardPayload struct {
+	Name     string `json:"name"`
+	Quantity int64  `json:"quantity"`
+}
+
+type formLotteryWinningTablePayload struct {
+	TableID string `json:"table_id,omitempty"`
+	Status  string `json:"status,omitempty"`
+}
+
+func parseFormLotteryPayload(value string) (*formLotteryPayload, error) {
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.DisallowUnknownFields()
+	var lottery *formLotteryPayload
+	if err := decoder.Decode(&lottery); err != nil || lottery == nil {
+		return nil, baseFlagErrorf("--config-json must be a valid lottery JSON object without unsupported fields: %v", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, baseFlagErrorf("--config-json must contain exactly one JSON object")
+	}
+	return lottery, nil
+}
+
+func validateLotteryConfig(lottery *formLotteryPayload, requireVersion bool) error {
 	if requireVersion {
-		if _, ok := lotteryInteger(lottery["version"], true); !ok {
+		if lottery.Version == nil || *lottery.Version < 0 {
 			return baseFlagErrorf("--config-json.version must be a non-negative integer for update action")
 		}
 	}
-	probability, ok := lotteryInteger(lottery["probability"], true)
-	if !ok || probability > 10000 {
+	if lottery.Probability == nil || *lottery.Probability < 0 || *lottery.Probability > 10000 {
 		return baseFlagErrorf("--config-json.probability must be an integer between 0 and 10000")
 	}
-	awarder, ok := lottery["awarder_info"].(map[string]interface{})
-	if !ok || nonEmptyLotteryString(awarder["name"]) == "" || nonEmptyLotteryString(awarder["contact_info"]) == "" {
+	awarder := lottery.AwarderInfo
+	if awarder == nil || strings.TrimSpace(awarder.Name) == "" || strings.TrimSpace(awarder.ContactInfo) == "" {
 		return baseFlagErrorf("--config-json.awarder_info requires non-empty name and contact_info")
 	}
-	if delivery, exists := awarder["award_delivery_way"]; exists && nonEmptyLotteryString(delivery) == "" {
+	if awarder.AwardDeliveryWay != nil && strings.TrimSpace(*awarder.AwardDeliveryWay) == "" {
 		return baseFlagErrorf("--config-json.awarder_info.award_delivery_way must be a non-empty string when provided")
 	}
-	awards, ok := lottery["awards"].([]interface{})
-	if !ok || len(awards) == 0 || len(awards) > 7 {
+	if lottery.Awards == nil || len(*lottery.Awards) == 0 || len(*lottery.Awards) > 7 {
 		return baseFlagErrorf("--config-json.awards must contain between 1 and 7 awards")
 	}
+	awards := *lottery.Awards
 	awardNames := make(map[string]bool, len(awards))
-	for index, raw := range awards {
-		award, ok := raw.(map[string]interface{})
-		name := nonEmptyLotteryString(award["name"])
-		if !ok || name == "" {
+	for index, award := range awards {
+		name := strings.TrimSpace(award.Name)
+		if name == "" {
 			return baseFlagErrorf("--config-json.awards[%d].name must be a non-empty string", index)
 		}
 		if awardNames[name] {
 			return baseFlagErrorf("--config-json award names must be unique")
 		}
 		awardNames[name] = true
-		quantity, ok := lotteryInteger(award["quantity"], false)
-		if !ok || quantity == 0 {
+		if award.Quantity <= 0 {
 			return baseFlagErrorf("--config-json.awards[%d].quantity must be a positive integer", index)
 		}
 	}
 	return nil
-}
-
-func lotteryInteger(value interface{}, allowZero bool) (int64, bool) {
-	number, ok := value.(float64)
-	if !ok || number < 0 || number != float64(int64(number)) || (!allowZero && number == 0) {
-		return 0, false
-	}
-	return int64(number), true
 }
 
 func nonEmptyLotteryString(value interface{}) string {
@@ -572,21 +606,13 @@ func validateRFC3339Flag(name, value string) error {
 	return nil
 }
 
-func parseJSONObjectFlag(name, value string) (map[string]interface{}, error) {
-	var body map[string]interface{}
-	if err := json.Unmarshal([]byte(value), &body); err != nil {
-		return nil, baseFlagErrorf("--%s must be valid JSON object: %v", name, err)
-	}
-	if body == nil {
-		return nil, baseFlagErrorf("--%s must be valid JSON object", name)
-	}
-	return body, nil
-}
-
 func parseJSONArrayFlag(name, value string) ([]interface{}, error) {
 	var body []interface{}
 	if err := json.Unmarshal([]byte(value), &body); err != nil {
 		return nil, baseFlagErrorf("--%s must be valid JSON array: %v", name, err)
+	}
+	if body == nil {
+		return nil, baseFlagErrorf("--%s must be valid JSON array", name)
 	}
 	return body, nil
 }
@@ -628,24 +654,6 @@ func anyChanged(runtime *common.RuntimeContext, names ...string) bool {
 	for _, name := range names {
 		if runtime.Changed(name) {
 			return true
-		}
-	}
-	return false
-}
-
-func containsKey(v interface{}, key string) bool {
-	switch x := v.(type) {
-	case map[string]interface{}:
-		for k, child := range x {
-			if k == key || containsKey(child, key) {
-				return true
-			}
-		}
-	case []interface{}:
-		for _, child := range x {
-			if containsKey(child, key) {
-				return true
-			}
 		}
 	}
 	return false
