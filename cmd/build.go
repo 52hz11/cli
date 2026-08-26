@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"sort"
 	"strings"
 
 	"github.com/larksuite/cli/cmd/api"
@@ -21,12 +22,14 @@ import (
 	"github.com/larksuite/cli/cmd/skill"
 	cmdupdate "github.com/larksuite/cli/cmd/update"
 	"github.com/larksuite/cli/cmd/whoami"
+	"github.com/larksuite/cli/extension/command"
 	"github.com/larksuite/cli/extension/platform"
 	"github.com/larksuite/cli/internal/affordance"
 	"github.com/larksuite/cli/internal/apicatalog"
 	"github.com/larksuite/cli/internal/build"
 	"github.com/larksuite/cli/internal/cmdpolicy"
 	"github.com/larksuite/cli/internal/cmdutil"
+	"github.com/larksuite/cli/internal/commandhost"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/hook"
 	"github.com/larksuite/cli/internal/keychain"
@@ -37,6 +40,7 @@ import (
 	"github.com/larksuite/cli/internal/skillref"
 	"github.com/larksuite/cli/internal/surface"
 	"github.com/larksuite/cli/shortcuts"
+	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/spf13/cobra"
 )
 
@@ -58,6 +62,7 @@ type buildConfig struct {
 	pluginProvider    func() []platform.Plugin
 	afterSnapshotOpen func()
 	hideProfileSet    bool
+	commandSets       []command.Set
 }
 
 type catalogSnapshot interface {
@@ -182,6 +187,16 @@ func WithAPICatalog(catalog apicatalog.Catalog) BuildOption {
 	}
 }
 
+// WithCommandSets adds build-time business commands to an independently built CLI.
+// The supplied declarations are copied when this option is created and compiled
+// as one atomic contribution during command-tree construction.
+func WithCommandSets(sets ...command.Set) BuildOption {
+	captured := command.CloneSets(sets)
+	return func(c *buildConfig) {
+		c.commandSets = append(c.commandSets, command.CloneSets(captured)...)
+	}
+}
+
 // Build constructs the full command tree by default. When
 // WithInvocationArgs is provided, it constructs only the command domains that
 // those arguments can reach and configures Cobra to execute the same arguments.
@@ -208,11 +223,12 @@ func Build(ctx context.Context, inv cmdutil.InvocationContext, opts ...BuildOpti
 	}
 
 	plugins := frozenPlugins(cfg)
+	registeredShortcuts, commandSetErr := resolveShortcutSnapshot(cfg.commandSets)
 	catalog, err := fullCatalog(cfg)
 	if err != nil {
 		return newCatalogFailureRoot(ctx, cfg, err)
 	}
-	_, rootCmd, _ := assembleInternal(ctx, inv, catalog, nil, plugins, cfg)
+	_, rootCmd, _ := assembleInternal(ctx, inv, catalog, nil, registeredShortcuts, commandSetErr, plugins, cfg)
 	return rootCmd
 }
 
@@ -256,13 +272,14 @@ func buildForArgsWithConfig(
 		cfg.snapshotOpener = func() (catalogSnapshot, error) { return registry.OpenSnapshot() }
 	}
 	plugins := frozenPlugins(cfg)
+	registeredShortcuts, commandSetErr := resolveShortcutSnapshot(cfg.commandSets)
 
 	// Version is the only deterministic no-Catalog invocation. Plugins are
 	// still installed below, and their Startup hooks run against the
 	// repository-owned root even though no Catalog commands are assembled.
 	preliminary := PlanAssembly(args, nil, nil)
 	if preliminary.Mode == AssemblyNone {
-		runtime, root, reg := assembleInternal(ctx, inv, apicatalog.Catalog{}, []string{}, plugins, cfg)
+		runtime, root, reg := assembleInternal(ctx, inv, apicatalog.Catalog{}, []string{}, registeredShortcuts, commandSetErr, plugins, cfg)
 		return &buildResult{runtime: runtime, root: root, registry: reg}, nil
 	}
 
@@ -287,7 +304,7 @@ func buildForArgsWithConfig(
 	// Plugins are frozen before planning. Any registered plugin receives the
 	// complete service tree so its policy and hook expectations cannot be
 	// bypassed by a target-only assembly.
-	plan := PlanAssembly(args, names, shortcuts.ShortcutServiceNames())
+	plan := PlanAssembly(args, names, shortcutServiceNames(registeredShortcuts))
 	if len(plugins) > 0 {
 		plan = fullAssemblyPlan()
 	}
@@ -295,7 +312,7 @@ func buildForArgsWithConfig(
 	if err != nil {
 		return nil, err
 	}
-	runtime, root, reg := assembleInternal(ctx, inv, catalog, plan.ShortcutDomains, plugins, cfg)
+	runtime, root, reg := assembleInternal(ctx, inv, catalog, plan.ShortcutDomains, registeredShortcuts, commandSetErr, plugins, cfg)
 	return &buildResult{runtime: runtime, root: root, registry: reg}, nil
 }
 
@@ -341,6 +358,30 @@ func frozenPlugins(cfg *buildConfig) []platform.Plugin {
 	return platform.RegisteredPlugins()
 }
 
+// resolveShortcutSnapshot compiles this build's business command sets and returns
+// one snapshot carrying built-in and external shortcuts together. On failure the
+// built-in snapshot is returned so assembly can install a fail-closed guard.
+func resolveShortcutSnapshot(sets []command.Set) ([]common.Shortcut, error) {
+	external, err := commandhost.CompileSets(sets)
+	if err != nil {
+		return shortcuts.AllShortcuts(), err
+	}
+	return shortcuts.AllShortcutsWithExternal(external)
+}
+
+func shortcutServiceNames(registered []common.Shortcut) []string {
+	seen := make(map[string]struct{})
+	for _, shortcut := range registered {
+		seen[shortcut.Service] = struct{}{}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // buildInternalWithConfig assembles the complete command tree from an
 // already-applied option snapshot. Target-aware callers use
 // buildForArgsWithConfig instead.
@@ -354,6 +395,7 @@ func buildInternalWithConfig(ctx context.Context, inv cmdutil.InvocationContext,
 	if cfg.snapshotOpener == nil {
 		cfg.snapshotOpener = func() (catalogSnapshot, error) { return registry.OpenSnapshot() }
 	}
+	registeredShortcuts, commandSetErr := resolveShortcutSnapshot(cfg.commandSets)
 	catalog, err := fullCatalog(cfg)
 	if err != nil {
 		root := newCatalogFailureRoot(ctx, cfg, err)
@@ -363,7 +405,7 @@ func buildInternalWithConfig(ctx context.Context, inv cmdutil.InvocationContext,
 		f.Recovery = runtime.recovery
 		return runtime, root, nil
 	}
-	return assembleInternal(ctx, inv, catalog, nil, frozenPlugins(cfg), cfg)
+	return assembleInternal(ctx, inv, catalog, nil, registeredShortcuts, commandSetErr, frozenPlugins(cfg), cfg)
 }
 
 func fullCatalog(cfg *buildConfig) (apicatalog.Catalog, error) {
@@ -450,6 +492,8 @@ func assembleInternal(
 	inv cmdutil.InvocationContext,
 	catalog apicatalog.Catalog,
 	shortcutDomains []string,
+	registeredShortcuts []common.Shortcut,
+	commandSetErr error,
 	plugins []platform.Plugin,
 	cfg *buildConfig,
 ) (*buildRuntime, *cobra.Command, *hook.Registry) {
@@ -516,7 +560,7 @@ func assembleInternal(
 	}
 
 	rootCmd.AddCommand(cmdconfig.NewCmdConfigWithRecovery(f, runtime.recovery))
-	rootCmd.AddCommand(auth.NewCmdAuthWithRecovery(f, runtime.recovery))
+	rootCmd.AddCommand(auth.NewCmdAuthWithRecoveryAndShortcuts(f, runtime.recovery, registeredShortcuts))
 	rootCmd.AddCommand(profile.NewCmdProfile(f))
 	rootCmd.AddCommand(doctor.NewCmdDoctorWithRecovery(f, runtime.recovery))
 	rootCmd.AddCommand(whoami.NewCmdWhoamiWithRecovery(f, runtime.recovery))
@@ -531,7 +575,11 @@ func assembleInternal(
 	if !cfg.skipService {
 		service.RegisterServiceCommandsWithContext(ctx, rootCmd, f)
 	}
-	shortcuts.RegisterShortcutsForDomainsWithContext(ctx, rootCmd, f, shortcutDomains)
+	shortcuts.RegisterShortcutSnapshotForDomainsWithContext(ctx, rootCmd, f, registeredShortcuts, shortcutDomains)
+	if commandSetErr != nil {
+		installCommandSetErrorGuard(rootCmd, commandSetErr)
+		return finalizeFailedBuild(runtime, rootCmd)
+	}
 
 	classifyRootCommands(rootCmd)
 

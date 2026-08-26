@@ -14,6 +14,7 @@ import (
 	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdmeta"
 	"github.com/larksuite/cli/internal/cmdutil"
+	"github.com/larksuite/cli/internal/commandbridge"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/deprecation"
 	"github.com/larksuite/cli/internal/registry"
@@ -65,11 +66,7 @@ func IsShortcutServiceAvailable(service string, brand core.LarkBrand) bool {
 }
 
 // allShortcuts aggregates shortcuts from all domain packages.
-var (
-	allShortcuts         []common.Shortcut
-	shortcutsByService   map[string][]common.Shortcut
-	shortcutServiceNames []string
-)
+var allShortcuts []common.Shortcut
 
 func init() {
 	allShortcuts = append(allShortcuts, apps.Shortcuts()...)
@@ -97,27 +94,45 @@ func init() {
 	allShortcuts = append(allShortcuts, whiteboard.Shortcuts()...)
 	allShortcuts = append(allShortcuts, wiki.Shortcuts()...)
 	allShortcuts = append(allShortcuts, okr.Shortcuts()...)
-
-	shortcutsByService = make(map[string][]common.Shortcut)
-	for _, shortcut := range allShortcuts {
-		if _, ok := shortcutsByService[shortcut.Service]; !ok {
-			shortcutServiceNames = append(shortcutServiceNames, shortcut.Service)
-		}
-		shortcutsByService[shortcut.Service] = append(shortcutsByService[shortcut.Service], shortcut)
-	}
-	slices.Sort(shortcutServiceNames)
 }
 
-// AllShortcuts returns a copy of all registered shortcuts (for dump-shortcuts).
+// AllShortcuts returns an isolated copy of all registered shortcuts.
+//
+// This is the isolation boundary, and the only place that needs to deep-copy:
+// the package global is filled once by init and never written again, but a
+// Shortcut carries slice fields whose backing arrays a shallow copy would still
+// share, so an external distribution mutating an element (registered[0].Flags[0])
+// would corrupt the global for the whole process. Callers inside this repository
+// receive an already-isolated snapshot and must not clone it again -- the copy
+// costs ~165us over 500+ shortcuts, which lands on every CLI startup.
 //
 //go:noinline
 func AllShortcuts() []common.Shortcut {
-	return append([]common.Shortcut(nil), allShortcuts...)
+	return common.CloneHostedShortcuts(allShortcuts, commandbridge.Access{})
 }
 
 // ShortcutServiceNames returns the sorted domains that provide shortcuts.
 func ShortcutServiceNames() []string {
-	return slices.Clone(shortcutServiceNames)
+	return shortcutServiceNamesForSnapshot(allShortcuts)
+}
+
+// AllShortcutsWithExternal returns one isolated shortcut snapshot after
+// validating external path collisions.
+func AllShortcutsWithExternal(commands []common.Shortcut) ([]common.Shortcut, error) {
+	registered := AllShortcuts()
+	external := common.CloneHostedShortcuts(commands, commandbridge.Access{})
+	paths := make(map[string]struct{}, len(registered)+len(external))
+	for _, shortcut := range registered {
+		paths[shortcut.Service+" "+shortcut.Command] = struct{}{}
+	}
+	for _, shortcut := range external {
+		path := shortcut.Service + " " + shortcut.Command
+		if _, duplicate := paths[path]; duplicate {
+			return nil, fmt.Errorf("external command path %q is already registered", path) //nolint:forbidigo // Intermediate build diagnostic wrapped by the command-set startup guard.
+		}
+		paths[path] = struct{}{}
+	}
+	return append(registered, external...), nil
 }
 
 // RegisterShortcuts registers all +shortcut commands on the program.
@@ -126,7 +141,7 @@ func RegisterShortcuts(program *cobra.Command, f *cmdutil.Factory) {
 }
 
 func RegisterShortcutsWithContext(ctx context.Context, program *cobra.Command, f *cmdutil.Factory) {
-	RegisterShortcutsForDomainsWithContext(ctx, program, f, nil)
+	RegisterShortcutSnapshotWithContext(ctx, program, f, AllShortcuts())
 }
 
 // RegisterShortcutsForDomainsWithContext registers shortcuts from the selected
@@ -138,7 +153,34 @@ func RegisterShortcutsForDomainsWithContext(
 	f *cmdutil.Factory,
 	domains []string,
 ) {
-	selectedServices := selectShortcutServices(domains)
+	RegisterShortcutSnapshotForDomainsWithContext(ctx, program, f, AllShortcuts(), domains)
+}
+
+// RegisterShortcutSnapshotWithContext mounts one build-local shortcut snapshot.
+func RegisterShortcutSnapshotWithContext(
+	ctx context.Context,
+	program *cobra.Command,
+	f *cmdutil.Factory,
+	registered []common.Shortcut,
+) {
+	RegisterShortcutSnapshotForDomainsWithContext(ctx, program, f, registered, nil)
+}
+
+// RegisterShortcutSnapshotForDomainsWithContext mounts the selected domains
+// from one build-local shortcut snapshot. A nil selection mounts every domain;
+// a non-nil empty selection mounts none.
+func RegisterShortcutSnapshotForDomainsWithContext(
+	ctx context.Context,
+	program *cobra.Command,
+	f *cmdutil.Factory,
+	registered []common.Shortcut,
+	domains []string,
+) {
+	byService := make(map[string][]common.Shortcut)
+	for _, shortcut := range registered {
+		byService[shortcut.Service] = append(byService[shortcut.Service], shortcut)
+	}
+	selectedServices := selectShortcutServices(byService, domains)
 	if len(selectedServices) == 0 {
 		return
 	}
@@ -152,7 +194,7 @@ func RegisterShortcutsForDomainsWithContext(
 	}
 
 	for _, service := range selectedServices {
-		shortcuts := shortcutsByService[service]
+		serviceShortcuts := byService[service]
 		// Find existing service command or create one
 		var svc *cobra.Command
 		for _, c := range program.Commands() {
@@ -194,7 +236,7 @@ func RegisterShortcutsForDomainsWithContext(
 				svc.Aliases = append(svc.Aliases, alias)
 			}
 		}
-		for _, shortcut := range shortcuts {
+		for _, shortcut := range serviceShortcuts {
 			shortcut.MountWithContext(ctx, svc, f)
 		}
 		if service == "apps" {
@@ -214,20 +256,38 @@ func RegisterShortcutsForDomainsWithContext(
 	}
 }
 
-func selectShortcutServices(domains []string) []string {
+func selectShortcutServices(byService map[string][]common.Shortcut, domains []string) []string {
 	if domains == nil {
-		return ShortcutServiceNames()
+		services := make([]string, 0, len(byService))
+		for service := range byService {
+			services = append(services, service)
+		}
+		slices.Sort(services)
+		return services
 	}
 
 	selected := make(map[string]struct{}, len(domains))
 	for _, domain := range domains {
-		if _, ok := shortcutsByService[domain]; ok {
+		if _, ok := byService[domain]; ok {
 			selected[domain] = struct{}{}
 		}
 	}
 
 	services := make([]string, 0, len(selected))
 	for service := range selected {
+		services = append(services, service)
+	}
+	slices.Sort(services)
+	return services
+}
+
+func shortcutServiceNamesForSnapshot(registered []common.Shortcut) []string {
+	seen := make(map[string]struct{})
+	for _, shortcut := range registered {
+		seen[shortcut.Service] = struct{}{}
+	}
+	services := make([]string, 0, len(seen))
+	for service := range seen {
 		services = append(services, service)
 	}
 	slices.Sort(services)

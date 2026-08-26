@@ -16,7 +16,6 @@ import (
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/registry"
-	"github.com/larksuite/cli/shortcuts"
 )
 
 // domainMeta describes a domain for the interactive selector.
@@ -32,46 +31,16 @@ type interactiveResult struct {
 	ScopeLevel string // "common" or "all"
 }
 
-// getDomainMetadata returns metadata for all known domains, sorted by name.
-func getDomainMetadata(catalog apicatalog.Catalog, lang string) []domainMeta {
-	seen := make(map[string]bool)
-	var domains []domainMeta
-
-	// 1. Domains from from_meta projects (skip domains with auth_domain)
-	for _, project := range catalogServiceNames(catalog) {
-		if registry.HasAuthDomain(project) {
-			seen[project] = true
+// metadata returns metadata for all known domains, sorted by name.
+func (r domainResolver) metadata(lang string, brand core.LarkBrand) []domainMeta {
+	known := r.allKnown(brand)
+	scopeless := r.scopeless()
+	domains := make([]domainMeta, 0, len(known))
+	for name := range known {
+		if scopeless[name] {
 			continue
 		}
-		dm := buildDomainMeta(catalog, project, lang)
-		domains = append(domains, dm)
-		seen[project] = true
-	}
-
-	// 2. Shortcut-only domains
-	shortcutOnlyNames := getShortcutOnlyDomainNames()
-	for _, name := range shortcutOnlyNames {
-		if !seen[name] {
-			dm := buildDomainMeta(catalog, name, lang)
-			domains = append(domains, dm)
-			seen[name] = true
-		}
-	}
-
-	// 3. Auto-discover remaining shortcut services that are listed as shortcut-only domains
-	//    (skip domains with auth_domain — they are folded into their parent)
-	shortcutOnlySet := make(map[string]bool)
-	for _, n := range shortcutOnlyNames {
-		shortcutOnlySet[n] = true
-	}
-	for _, sc := range shortcuts.AllShortcuts() {
-		if !seen[sc.Service] {
-			if shortcutOnlySet[sc.Service] && !registry.HasAuthDomain(sc.Service) {
-				dm := buildDomainMeta(catalog, sc.Service, lang)
-				domains = append(domains, dm)
-			}
-			seen[sc.Service] = true
-		}
+		domains = append(domains, buildDomainMeta(r.catalog, name, lang))
 	}
 
 	sort.Slice(domains, func(i, j int) bool {
@@ -102,9 +71,8 @@ func buildDomainMeta(catalog apicatalog.Catalog, name, lang string) domainMeta {
 	return dm
 }
 
-// runInteractiveLogin shows an interactive TUI form for domain and permission selection.
-func runInteractiveLogin(ios *cmdutil.IOStreams, catalog apicatalog.Catalog, lang string, msg *loginMsg, brand core.LarkBrand) (*interactiveResult, error) {
-	allDomains := getDomainMetadata(catalog, lang)
+func runInteractiveLogin(ios *cmdutil.IOStreams, lang string, msg *loginMsg, brand core.LarkBrand, resolver domainResolver) (*interactiveResult, error) {
+	allDomains := resolver.metadata(lang, brand)
 
 	// Build multi-select options
 	options := make([]huh.Option[string], len(allDomains))
@@ -163,7 +131,7 @@ func runInteractiveLogin(ios *cmdutil.IOStreams, catalog apicatalog.Catalog, lan
 	}
 
 	// Compute scope summary
-	scopes := collectScopesForDomains(catalog, selectedDomains, "user", brand)
+	scopes := resolver.scopesFor(selectedDomains, "user", brand)
 	if permLevel == "common" {
 		scopes = registry.FilterAutoApproveScopes(scopes)
 	}
