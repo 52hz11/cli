@@ -252,7 +252,7 @@ func TestFormConfigPatchDryRunMatchesExecute(t *testing.T) {
 		{
 			name: "submit redirect", shortcut: BaseFormSubmitActionsUpdate,
 			command: "+form-submit-actions-update", segment: "submit-actions",
-			flags: []string{"--type", "redirect", "--enabled=true", "--redirect-url", "https://example.com/done"},
+			flags: []string{"--type", "redirect", "--enabled=true", "--revision", "123", "--redirect-url", "https://example.com/done"},
 		},
 	}
 	for _, tt := range tests {
@@ -420,7 +420,7 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 			name:     "result page description rejects null",
 			shortcut: BaseFormSubmitActionsUpdate,
 			command:  "+form-submit-actions-update",
-			args:     []string{"--type", "result-page", "--enabled=true", "--title", "submitted", "--description-json", "null"},
+			args:     []string{"--type", "result-page", "--enabled=true", "--revision", "123", "--title", "submitted", "--description-json", "null"},
 			param:    "--description-json",
 			want:     "valid JSON array",
 		},
@@ -428,7 +428,7 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 			name:     "redirect requires https",
 			shortcut: BaseFormSubmitActionsUpdate,
 			command:  "+form-submit-actions-update",
-			args:     []string{"--type", "redirect", "--enabled=true", "--redirect-url", "http://example.com"},
+			args:     []string{"--type", "redirect", "--enabled=true", "--revision", "123", "--redirect-url", "http://example.com"},
 			param:    "--redirect-url",
 			want:     "HTTPS",
 		},
@@ -449,6 +449,22 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 			err := runShortcut(t, tt.shortcut, args, factory, stdout)
 			assertInvalidArgumentValidation(t, err, tt.param, nil, tt.want)
 		})
+	}
+}
+
+func TestFormSubmitActionsRequiresRevision(t *testing.T) {
+	factory, stdout, _ := newExecuteFactory(t)
+	args := []string{
+		"+form-submit-actions-update",
+		"--base-token", "app_x",
+		"--table-id", "tbl_1",
+		"--form-id", "vew_1",
+		"--type", "redirect",
+		"--enabled=false",
+	}
+	err := runShortcut(t, BaseFormSubmitActionsUpdate, args, factory, stdout)
+	if err == nil || !strings.Contains(err.Error(), `required flag(s) "revision" not set`) {
+		t.Fatalf("expected required revision error, got %v", err)
 	}
 }
 

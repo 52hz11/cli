@@ -109,7 +109,7 @@ var BaseFormSubmitActionsUpdate = common.Shortcut{
 	Flags: appendFormConfigFlags(
 		common.Flag{Name: "type", Desc: "submit action type", Required: true, Enum: []string{"result-page", "redirect"}},
 		common.Flag{Name: "enabled", Type: "bool", Desc: "enable or disable the action", Required: true},
-		common.Flag{Name: "revision", Type: "int", Desc: "current action revision"},
+		common.Flag{Name: "revision", Type: "int", Desc: "current action revision", Required: true},
 		common.Flag{Name: "title", Desc: "result page title"},
 		common.Flag{Name: "description-json", Desc: "result page description JSON array", Input: []string{common.File, common.Stdin}},
 		common.Flag{Name: "redirect-url", Desc: "redirect URL after form submit"},
@@ -413,11 +413,11 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 }
 
 func buildFormSubmitActionsBody(runtime *common.RuntimeContext) (map[string]interface{}, error) {
-	enabled := runtime.Bool("enabled")
-	body := map[string]interface{}{}
-	if runtime.Changed("revision") {
-		body["revision"] = runtime.Int("revision")
+	if !runtime.Changed("revision") {
+		return nil, baseFlagErrorf("--revision is required")
 	}
+	enabled := runtime.Bool("enabled")
+	body := map[string]interface{}{"revision": runtime.Int("revision")}
 	group := map[string]interface{}{"enabled": enabled}
 
 	switch runtime.Str("type") {
