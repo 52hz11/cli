@@ -6,6 +6,7 @@ package base
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,7 +38,7 @@ var BaseFormSubmissionSettingsUpdate = common.Shortcut{
 		common.Flag{Name: "end-at", Desc: "submission end time in RFC3339 format"},
 		common.Flag{Name: "timezone", Desc: "IANA timezone, for example Asia/Shanghai"},
 		common.Flag{Name: "user-submit-limit-enabled", Type: "bool", Desc: "enable or disable per-user submission limit"},
-		common.Flag{Name: "user-submit-limit", Type: "int", Desc: "maximum submissions per user"},
+		common.Flag{Name: "user-submit-limit", Type: "int", Desc: "maximum submissions per user; currently must be 1"},
 		common.Flag{Name: "user-submit-cycle", Desc: "per-user limit cycle", Enum: []string{"total", "day", "week", "month"}},
 		common.Flag{Name: "total-submit-limit-enabled", Type: "bool", Desc: "enable or disable total submission limit"},
 		common.Flag{Name: "total-submit-maximum", Type: "int", Desc: "maximum total submissions"},
@@ -73,13 +74,14 @@ var BaseFormNotificationsUpdate = common.Shortcut{
 		common.Flag{Name: "type", Desc: "notification type", Required: true, Enum: []string{"on-submission", "scheduled"}},
 		common.Flag{Name: "enabled", Type: "bool", Desc: "enable or disable this notification", Required: true},
 		common.Flag{Name: "locale", Desc: "notification locale"},
-		common.Flag{Name: "receivers-json", Desc: "receiver list JSON array; each receiver must contain only open_id", Input: []string{common.File, common.Stdin}},
+		common.Flag{Name: "receiver-open-id", Type: "string_array", Desc: "receiver open_id; repeat this flag for multiple receivers"},
 		common.Flag{Name: "notify-time", Desc: "scheduled notify time in RFC3339 format"},
-		common.Flag{Name: "repeat-type", Desc: "scheduled repeat type"},
+		common.Flag{Name: "repeat-type", Desc: "scheduled repeat type", Enum: []string{"no_repeat", "day", "week", "month"}},
 		common.Flag{Name: "timezone", Desc: "IANA timezone, for example Asia/Shanghai"},
 	),
 	Tips: []string{
 		"Use --type on-submission or --type scheduled; update only one notification group per invocation.",
+		"When enabling either notification type, repeat --receiver-open-id at least once.",
 		"Disabling a notification only accepts --type and --enabled=false, plus optional --locale.",
 	},
 	Validate: func(_ context.Context, runtime *common.RuntimeContext) error {
@@ -272,11 +274,19 @@ func buildFormSubmissionSettingsBody(runtime *common.RuntimeContext) (map[string
 			if err := validateRFC3339Flag("end-at", runtime.Str("end-at")); err != nil {
 				return nil, err
 			}
+			startAt, _ := time.Parse(time.RFC3339, runtime.Str("start-at"))
+			endAt, _ := time.Parse(time.RFC3339, runtime.Str("end-at"))
+			if !startAt.Before(endAt) {
+				return nil, baseFlagErrorf("--start-at must be before --end-at")
+			}
+			if _, err := time.LoadLocation(runtime.Str("timezone")); err != nil {
+				return nil, baseFlagErrorf("--timezone must be a valid IANA timezone: %v", err)
+			}
 			period["start_at"] = runtime.Str("start-at")
 			period["end_at"] = runtime.Str("end-at")
 			period["timezone"] = runtime.Str("timezone")
-		} else if runtime.Changed("timezone") {
-			period["timezone"] = runtime.Str("timezone")
+		} else if anyChanged(runtime, "start-at", "end-at", "timezone") {
+			return nil, baseFlagErrorf("disabling submission period only accepts --submission-period-enabled=false")
 		}
 		body["submission_period"] = period
 	case "user_submit_limit":
@@ -286,14 +296,16 @@ func buildFormSubmissionSettingsBody(runtime *common.RuntimeContext) (map[string
 		enabled := runtime.Bool("user-submit-limit-enabled")
 		limit := map[string]interface{}{"enabled": enabled}
 		if enabled {
-			if runtime.Int("user-submit-limit") <= 0 {
-				return nil, baseFlagErrorf("--user-submit-limit must be greater than 0 when --user-submit-limit-enabled=true")
+			if runtime.Int("user-submit-limit") != 1 {
+				return nil, baseFlagErrorf("--user-submit-limit must be 1 when --user-submit-limit-enabled=true")
 			}
 			if runtime.Str("user-submit-cycle") == "" {
 				return nil, baseFlagErrorf("--user-submit-cycle is required when --user-submit-limit-enabled=true")
 			}
 			limit["frequency_limit"] = runtime.Int("user-submit-limit")
 			limit["frequency_cycle"] = runtime.Str("user-submit-cycle")
+		} else if anyChanged(runtime, "user-submit-limit", "user-submit-cycle") {
+			return nil, baseFlagErrorf("disabling user submit limit only accepts --user-submit-limit-enabled=false")
 		}
 		body["user_submit_limit"] = limit
 	case "total_submit_limit":
@@ -303,10 +315,12 @@ func buildFormSubmissionSettingsBody(runtime *common.RuntimeContext) (map[string
 		enabled := runtime.Bool("total-submit-limit-enabled")
 		limit := map[string]interface{}{"enabled": enabled}
 		if enabled {
-			if runtime.Int("total-submit-maximum") <= 0 {
-				return nil, baseFlagErrorf("--total-submit-maximum must be greater than 0 when --total-submit-limit-enabled=true")
+			if runtime.Int("total-submit-maximum") <= 0 || runtime.Int("total-submit-maximum") > 100000 {
+				return nil, baseFlagErrorf("--total-submit-maximum must be between 1 and 100000 when --total-submit-limit-enabled=true")
 			}
 			limit["maximum"] = runtime.Int("total-submit-maximum")
+		} else if runtime.Changed("total-submit-maximum") {
+			return nil, baseFlagErrorf("disabling total submit limit only accepts --total-submit-limit-enabled=false")
 		}
 		body["total_submit_limit"] = limit
 	case "allow_modify_submission":
@@ -345,11 +359,15 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 	}
 
 	group := map[string]interface{}{"enabled": enabled}
+	receivers, err := formNotificationReceivers(runtime.StrArray("receiver-open-id"))
+	if err != nil {
+		return nil, err
+	}
+	if enabled && len(receivers) == 0 {
+		return nil, baseFlagErrorf("at least one --receiver-open-id is required when notification is enabled")
+	}
 	if runtime.Str("type") == "scheduled" {
 		if enabled {
-			if runtime.Str("receivers-json") == "" {
-				return nil, baseFlagErrorf("--receivers-json is required when scheduled notification is enabled")
-			}
 			if runtime.Str("notify-time") == "" {
 				return nil, baseFlagErrorf("--notify-time is required when scheduled notification is enabled")
 			}
@@ -359,13 +377,6 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 			if runtime.Str("timezone") == "" {
 				return nil, baseFlagErrorf("--timezone is required when scheduled notification is enabled")
 			}
-			receivers, err := parseJSONArrayFlag("receivers-json", runtime.Str("receivers-json"))
-			if err != nil {
-				return nil, err
-			}
-			if err := validateNotificationReceivers(receivers); err != nil {
-				return nil, err
-			}
 			if err := validateRFC3339Flag("notify-time", runtime.Str("notify-time")); err != nil {
 				return nil, err
 			}
@@ -373,24 +384,17 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 			group["notify_time"] = runtime.Str("notify-time")
 			group["repeat_type"] = runtime.Str("repeat-type")
 			group["timezone"] = runtime.Str("timezone")
-		} else if anyChanged(runtime, "receivers-json", "notify-time", "repeat-type", "timezone") {
+		} else if anyChanged(runtime, "receiver-open-id", "notify-time", "repeat-type", "timezone") {
 			return nil, baseFlagErrorf("disabling scheduled notification only accepts --type, --enabled=false, and optional --locale")
 		}
 		body["scheduled"] = group
 		return body, nil
 	}
 
-	if !enabled && anyChanged(runtime, "receivers-json", "notify-time", "repeat-type", "timezone") {
+	if !enabled && anyChanged(runtime, "receiver-open-id", "notify-time", "repeat-type", "timezone") {
 		return nil, baseFlagErrorf("disabling on-submission notification only accepts --type, --enabled=false, and optional --locale")
 	}
-	if runtime.Changed("receivers-json") {
-		receivers, err := parseJSONArrayFlag("receivers-json", runtime.Str("receivers-json"))
-		if err != nil {
-			return nil, err
-		}
-		if err := validateNotificationReceivers(receivers); err != nil {
-			return nil, err
-		}
+	if enabled {
 		group["receivers"] = receivers
 	}
 	body["on_submission"] = group
@@ -426,6 +430,8 @@ func buildFormSubmitActionsBody(runtime *common.RuntimeContext) (map[string]inte
 			}
 			group["title"] = runtime.Str("title")
 			group["description"] = description
+		} else if runtime.Changed("title") || runtime.Changed("description-json") {
+			return nil, baseFlagErrorf("disabling result page must not include --title or --description-json")
 		}
 		body["result_page"] = group
 		return body, nil
@@ -437,7 +443,12 @@ func buildFormSubmitActionsBody(runtime *common.RuntimeContext) (map[string]inte
 			if runtime.Str("redirect-url") == "" {
 				return nil, baseFlagErrorf("--redirect-url is required when redirect is enabled")
 			}
+			if !isHTTPSFormConfigURL(runtime.Str("redirect-url")) {
+				return nil, baseFlagErrorf("--redirect-url must be a valid HTTPS URL")
+			}
 			group["url"] = runtime.Str("redirect-url")
+		} else if runtime.Changed("redirect-url") {
+			return nil, baseFlagErrorf("disabling redirect must not include --redirect-url")
 		}
 		body["redirect"] = group
 		return body, nil
@@ -454,6 +465,9 @@ func buildFormLotteryActionBody(runtime *common.RuntimeContext) (map[string]inte
 	}
 	body := map[string]interface{}{"action": wireAction}
 	config := runtime.Str("config-json")
+	if action == "disable" && runtime.Changed("config-json") {
+		return nil, baseFlagErrorf("--config-json is not accepted for disable action")
+	}
 	if action == "enable" || action == "update" {
 		if config == "" {
 			return nil, baseFlagErrorf("--config-json is required for %s action", action)
@@ -475,34 +489,80 @@ func buildFormLotteryActionBody(runtime *common.RuntimeContext) (map[string]inte
 				return nil, baseFlagErrorf("--config-json.version is required for update action")
 			}
 		}
+		if action == "enable" || action == "update" {
+			if err := validateLotteryConfig(lottery, action == "update"); err != nil {
+				return nil, err
+			}
+		}
 		body["lottery"] = lottery
 		return body, nil
-	}
-	if runtime.Changed("config-json") && action == "disable" {
-		return nil, baseFlagErrorf("--config-json is not accepted for disable action")
 	}
 	return body, nil
 }
 
-func validateNotificationReceivers(receivers []interface{}) error {
-	for _, receiver := range receivers {
-		item, ok := receiver.(map[string]interface{})
-		if !ok {
-			return baseFlagErrorf("--receivers-json items must be objects containing only open_id")
+func formNotificationReceivers(openIDs []string) ([]interface{}, error) {
+	receivers := make([]interface{}, 0, len(openIDs))
+	for _, openID := range openIDs {
+		openID = strings.TrimSpace(openID)
+		if openID == "" {
+			return nil, baseFlagErrorf("--receiver-open-id must be non-empty")
 		}
-		if len(item) != 1 {
-			return baseFlagErrorf("--receivers-json items must contain only open_id")
+		receivers = append(receivers, map[string]interface{}{"open_id": openID})
+	}
+	return receivers, nil
+}
+
+func validateLotteryConfig(lottery map[string]interface{}, requireVersion bool) error {
+	if requireVersion {
+		if _, ok := lotteryInteger(lottery["version"], true); !ok {
+			return baseFlagErrorf("--config-json.version must be a non-negative integer for update action")
 		}
-		openIDValue, exists := item["open_id"]
-		if !exists {
-			return baseFlagErrorf("--receivers-json items must contain only open_id")
+	}
+	probability, ok := lotteryInteger(lottery["probability"], true)
+	if !ok || probability > 10000 {
+		return baseFlagErrorf("--config-json.probability must be an integer between 0 and 10000")
+	}
+	awarder, ok := lottery["awarder_info"].(map[string]interface{})
+	if !ok || nonEmptyLotteryString(awarder["name"]) == "" || nonEmptyLotteryString(awarder["contact_info"]) == "" {
+		return baseFlagErrorf("--config-json.awarder_info requires non-empty name and contact_info")
+	}
+	if delivery, exists := awarder["award_delivery_way"]; exists && nonEmptyLotteryString(delivery) == "" {
+		return baseFlagErrorf("--config-json.awarder_info.award_delivery_way must be a non-empty string when provided")
+	}
+	awards, ok := lottery["awards"].([]interface{})
+	if !ok || len(awards) == 0 || len(awards) > 7 {
+		return baseFlagErrorf("--config-json.awards must contain between 1 and 7 awards")
+	}
+	awardNames := make(map[string]bool, len(awards))
+	for index, raw := range awards {
+		award, ok := raw.(map[string]interface{})
+		name := nonEmptyLotteryString(award["name"])
+		if !ok || name == "" {
+			return baseFlagErrorf("--config-json.awards[%d].name must be a non-empty string", index)
 		}
-		openID, ok := openIDValue.(string)
-		if !ok || strings.TrimSpace(openID) == "" {
-			return baseFlagErrorf("--receivers-json items must contain a non-empty open_id")
+		if awardNames[name] {
+			return baseFlagErrorf("--config-json award names must be unique")
+		}
+		awardNames[name] = true
+		quantity, ok := lotteryInteger(award["quantity"], false)
+		if !ok || quantity == 0 {
+			return baseFlagErrorf("--config-json.awards[%d].quantity must be a positive integer", index)
 		}
 	}
 	return nil
+}
+
+func lotteryInteger(value interface{}, allowZero bool) (int64, bool) {
+	number, ok := value.(float64)
+	if !ok || number < 0 || number != float64(int64(number)) || (!allowZero && number == 0) {
+		return 0, false
+	}
+	return int64(number), true
+}
+
+func nonEmptyLotteryString(value interface{}) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }
 
 func validateRFC3339Flag(name, value string) error {
@@ -540,25 +600,28 @@ func validateResultPageDescription(items []interface{}) error {
 		typ, _ := obj["type"].(string)
 		switch typ {
 		case "text":
-			if _, ok := obj["text"].(string); !ok {
-				return baseFlagErrorf("--description-json text items require text")
+			if nonEmptyLotteryString(obj["text"]) == "" || obj["url"] != nil || obj["open_id"] != nil {
+				return baseFlagErrorf("--description-json text items only accept non-empty text")
 			}
 		case "url":
-			if _, ok := obj["text"].(string); !ok {
-				return baseFlagErrorf("--description-json url items require text")
-			}
-			if _, ok := obj["url"].(string); !ok {
-				return baseFlagErrorf("--description-json url items require url")
+			urlValue, _ := obj["url"].(string)
+			if nonEmptyLotteryString(obj["text"]) == "" || !isHTTPSFormConfigURL(urlValue) || obj["open_id"] != nil {
+				return baseFlagErrorf("--description-json url items require non-empty text and an HTTPS url")
 			}
 		case "mention":
-			if _, ok := obj["open_id"].(string); !ok {
-				return baseFlagErrorf("--description-json mention items require open_id")
+			if nonEmptyLotteryString(obj["open_id"]) == "" || obj["url"] != nil {
+				return baseFlagErrorf("--description-json mention items require a non-empty open_id")
 			}
 		default:
 			return baseFlagErrorf("--description-json item type must be text, url, or mention")
 		}
 	}
 	return nil
+}
+
+func isHTTPSFormConfigURL(value string) bool {
+	parsed, err := url.ParseRequestURI(value)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != ""
 }
 
 func anyChanged(runtime *common.RuntimeContext, names ...string) bool {

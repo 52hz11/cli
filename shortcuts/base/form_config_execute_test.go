@@ -99,8 +99,8 @@ func TestFormSubmissionSettingsUpdateBuildsBodies(t *testing.T) {
 		},
 		{
 			name:  "user submit limit",
-			flags: []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "3", "--user-submit-cycle", "day"},
-			want:  map[string]interface{}{"user_submit_limit": map[string]interface{}{"enabled": true, "frequency_limit": float64(3), "frequency_cycle": "day"}},
+			flags: []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "1", "--user-submit-cycle", "day"},
+			want:  map[string]interface{}{"user_submit_limit": map[string]interface{}{"enabled": true, "frequency_limit": float64(1), "frequency_cycle": "day"}},
 		},
 		{
 			name:  "allow modify false",
@@ -129,7 +129,8 @@ func TestFormNotificationsUpdateBuildsScheduledBody(t *testing.T) {
 		"--type", "scheduled",
 		"--enabled=true",
 		"--locale", "zh_cn",
-		"--receivers-json", `[{"open_id":"ou_1"}]`,
+		"--receiver-open-id", "ou_1",
+		"--receiver-open-id", "ou_2",
 		"--notify-time", "2026-08-25T10:00:00+08:00",
 		"--repeat-type", "day",
 		"--timezone", "Asia/Shanghai",
@@ -137,8 +138,11 @@ func TestFormNotificationsUpdateBuildsScheduledBody(t *testing.T) {
 	want := map[string]interface{}{
 		"locale": "zh_cn",
 		"scheduled": map[string]interface{}{
-			"enabled":     true,
-			"receivers":   []interface{}{map[string]interface{}{"open_id": "ou_1"}},
+			"enabled": true,
+			"receivers": []interface{}{
+				map[string]interface{}{"open_id": "ou_1"},
+				map[string]interface{}{"open_id": "ou_2"},
+			},
 			"notify_time": "2026-08-25T10:00:00+08:00",
 			"repeat_type": "day",
 			"timezone":    "Asia/Shanghai",
@@ -177,14 +181,18 @@ func TestFormSubmitActionsUpdateBuildsResultPageBody(t *testing.T) {
 func TestFormLotteryActionBuildsUpdateBody(t *testing.T) {
 	stub := runFormConfigPost(t, BaseFormLotteryAction, "+form-lottery-action", "lottery/actions",
 		"--action", "update",
-		"--config-json", `{"version":1,"probability":10000,"awards":[{"name":"gift","quantity":10}]}`,
+		"--config-json", `{"version":1,"probability":10000,"awarder_info":{"name":"Base team","contact_info":"support@example.com"},"awards":[{"name":"gift","quantity":10}]}`,
 	)
 	want := map[string]interface{}{
 		"action": "update",
 		"lottery": map[string]interface{}{
 			"version":     float64(1),
 			"probability": float64(10000),
-			"awards":      []interface{}{map[string]interface{}{"name": "gift", "quantity": float64(10)}},
+			"awarder_info": map[string]interface{}{
+				"name":         "Base team",
+				"contact_info": "support@example.com",
+			},
+			"awards": []interface{}{map[string]interface{}{"name": "gift", "quantity": float64(10)}},
 		},
 	}
 	if got := decodeCapturedJSONBody(t, stub); !reflect.DeepEqual(got, want) {
@@ -223,6 +231,54 @@ func TestFormLotteryActionRelinkDryRunMatchesExecute(t *testing.T) {
 	}
 }
 
+func TestFormConfigPatchDryRunMatchesExecute(t *testing.T) {
+	tests := []struct {
+		name     string
+		shortcut common.Shortcut
+		command  string
+		segment  string
+		flags    []string
+	}{
+		{
+			name: "submission settings explicit false", shortcut: BaseFormSubmissionSettingsUpdate,
+			command: "+form-submission-settings-update", segment: "submission-settings",
+			flags: []string{"--ai-voice-input-enabled=false"},
+		},
+		{
+			name: "notifications repeat receiver", shortcut: BaseFormNotificationsUpdate,
+			command: "+form-notifications-update", segment: "notifications",
+			flags: []string{"--type", "on-submission", "--enabled=true", "--receiver-open-id", "ou_1"},
+		},
+		{
+			name: "submit redirect", shortcut: BaseFormSubmitActionsUpdate,
+			command: "+form-submit-actions-update", segment: "submit-actions",
+			flags: []string{"--type", "redirect", "--enabled=true", "--redirect-url", "https://example.com/done"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := runFormConfigPatch(t, tt.shortcut, tt.command, tt.segment, tt.flags...)
+			executed := decodeCapturedJSONBody(t, stub)
+
+			factory, stdout, _ := newExecuteFactory(t)
+			args := []string{tt.command, "--base-token", "app_x", "--table-id", "tbl_1", "--form-id", "vew_1"}
+			args = append(args, tt.flags...)
+			args = append(args, "--dry-run")
+			if err := runShortcut(t, tt.shortcut, args, factory, stdout); err != nil {
+				t.Fatalf("dry-run shortcut: %v", err)
+			}
+			previewed, call := dryRunPreviewBody(t, stdout.Bytes())
+			if !reflect.DeepEqual(previewed, executed) {
+				t.Fatalf("preview body=%#v, executed %#v", previewed, executed)
+			}
+			wantURL := "/open-apis/base/v3/bases/app_x/tables/tbl_1/forms/vew_1/" + tt.segment
+			if call.Method != "PATCH" || call.URL != wantURL {
+				t.Fatalf("dry-run call=%s %s, want PATCH %s", call.Method, call.URL, wantURL)
+			}
+		})
+	}
+}
+
 func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -233,36 +289,36 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "notification open chat",
-			shortcut: BaseFormNotificationsUpdate,
-			command:  "+form-notifications-update",
-			args:     []string{"--type", "scheduled", "--enabled=true", "--receivers-json", `[{"open_chat_id":"oc_1"}]`, "--notify-time", "2026-08-25T10:00:00+08:00", "--repeat-type", "day", "--timezone", "Asia/Shanghai"},
-			param:    "--receivers-json",
-			want:     "only open_id",
+			name:     "user submit limit must be one",
+			shortcut: BaseFormSubmissionSettingsUpdate,
+			command:  "+form-submission-settings-update",
+			args:     []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "2", "--user-submit-cycle", "day"},
+			param:    "--user-submit-limit",
+			want:     "must be 1",
 		},
 		{
-			name:     "notification internal user id",
+			name:     "on submission receiver required",
 			shortcut: BaseFormNotificationsUpdate,
 			command:  "+form-notifications-update",
-			args:     []string{"--type", "on-submission", "--enabled=true", "--receivers-json", `[{"open_id":"ou_1","user_id":"123"}]`},
-			param:    "--receivers-json",
-			want:     "only open_id",
+			args:     []string{"--type", "on-submission", "--enabled=true"},
+			param:    "--receiver-open-id",
+			want:     "at least one",
 		},
 		{
-			name:     "notification union id",
+			name:     "scheduled receiver required",
 			shortcut: BaseFormNotificationsUpdate,
 			command:  "+form-notifications-update",
-			args:     []string{"--type", "on-submission", "--enabled=true", "--receivers-json", `[{"union_id":"on_1"}]`},
-			param:    "--receivers-json",
-			want:     "open_id",
+			args:     []string{"--type", "scheduled", "--enabled=true", "--notify-time", "2026-08-25T10:00:00+08:00", "--repeat-type", "day", "--timezone", "Asia/Shanghai"},
+			param:    "--receiver-open-id",
+			want:     "at least one",
 		},
 		{
-			name:     "notification email",
+			name:     "empty receiver",
 			shortcut: BaseFormNotificationsUpdate,
 			command:  "+form-notifications-update",
-			args:     []string{"--type", "on-submission", "--enabled=true", "--receivers-json", `[{"email":"user@example.com"}]`},
-			param:    "--receivers-json",
-			want:     "open_id",
+			args:     []string{"--type", "on-submission", "--enabled=true", "--receiver-open-id", "   "},
+			param:    "--receiver-open-id",
+			want:     "non-empty",
 		},
 		{
 			name:     "lottery icon token",
@@ -273,12 +329,52 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 			want:     "icon_token",
 		},
 		{
+			name:     "empty lottery config",
+			shortcut: BaseFormLotteryAction,
+			command:  "+form-lottery-action",
+			args:     []string{"--action", "enable", "--config-json", `{}`},
+			param:    "--config-json",
+			want:     "probability",
+		},
+		{
+			name:     "disable rejects config",
+			shortcut: BaseFormLotteryAction,
+			command:  "+form-lottery-action",
+			args:     []string{"--action", "disable", "--config-json", `{}`},
+			param:    "--config-json",
+			want:     "not accepted",
+		},
+		{
 			name:     "relink awards",
 			shortcut: BaseFormLotteryAction,
 			command:  "+form-lottery-action",
 			args:     []string{"--action", "relink-winning-table", "--config-json", `{"version":2,"awards":[]}`},
 			param:    "--config-json",
 			want:     "awards",
+		},
+		{
+			name:     "disabled submission period rejects dates",
+			shortcut: BaseFormSubmissionSettingsUpdate,
+			command:  "+form-submission-settings-update",
+			args:     []string{"--submission-period-enabled=false", "--start-at", "2026-08-25T10:00:00+08:00"},
+			param:    "--submission-period-enabled",
+			want:     "only accepts",
+		},
+		{
+			name:     "redirect requires https",
+			shortcut: BaseFormSubmitActionsUpdate,
+			command:  "+form-submit-actions-update",
+			args:     []string{"--type", "redirect", "--enabled=true", "--redirect-url", "http://example.com"},
+			param:    "--redirect-url",
+			want:     "HTTPS",
+		},
+		{
+			name:     "lottery award names unique",
+			shortcut: BaseFormLotteryAction,
+			command:  "+form-lottery-action",
+			args:     []string{"--action", "enable", "--config-json", `{"probability":100,"awarder_info":{"name":"owner","contact_info":"contact"},"awards":[{"name":"gift","quantity":1},{"name":"gift","quantity":2}]}`},
+			param:    "--config-json",
+			want:     "unique",
 		},
 	}
 	for _, tt := range tests {
