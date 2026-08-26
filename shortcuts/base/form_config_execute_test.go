@@ -177,7 +177,7 @@ func TestFormSubmitActionsUpdateBuildsResultPageBody(t *testing.T) {
 func TestFormLotteryActionBuildsUpdateBody(t *testing.T) {
 	stub := runFormConfigPost(t, BaseFormLotteryAction, "+form-lottery-action", "lottery/actions",
 		"--action", "update",
-		"--lottery-json", `{"version":1,"probability":10000,"awards":[{"name":"gift","quantity":10}]}`,
+		"--config-json", `{"version":1,"probability":10000,"awards":[{"name":"gift","quantity":10}]}`,
 	)
 	want := map[string]interface{}{
 		"action": "update",
@@ -189,6 +189,37 @@ func TestFormLotteryActionBuildsUpdateBody(t *testing.T) {
 	}
 	if got := decodeCapturedJSONBody(t, stub); !reflect.DeepEqual(got, want) {
 		t.Fatalf("request body=%#v, want %#v", got, want)
+	}
+}
+
+func TestFormLotteryActionRelinkDryRunMatchesExecute(t *testing.T) {
+	flags := []string{
+		"--action", "relink-winning-table",
+		"--config-json", `{"version":2,"probability":5000}`,
+	}
+	stub := runFormConfigPost(t, BaseFormLotteryAction, "+form-lottery-action", "lottery/actions", flags...)
+	executed := decodeCapturedJSONBody(t, stub)
+	want := map[string]interface{}{
+		"action":  "relink_winning_table",
+		"lottery": map[string]interface{}{"version": float64(2), "probability": float64(5000)},
+	}
+	if !reflect.DeepEqual(executed, want) {
+		t.Fatalf("request body=%#v, want %#v", executed, want)
+	}
+
+	factory, stdout, _ := newExecuteFactory(t)
+	args := []string{"+form-lottery-action", "--base-token", "app_x", "--table-id", "tbl_1", "--form-id", "vew_1"}
+	args = append(args, flags...)
+	args = append(args, "--dry-run")
+	if err := runShortcut(t, BaseFormLotteryAction, args, factory, stdout); err != nil {
+		t.Fatalf("dry-run shortcut: %v", err)
+	}
+	previewed, call := dryRunPreviewBody(t, stdout.Bytes())
+	if !reflect.DeepEqual(previewed, executed) {
+		t.Fatalf("preview body=%#v, executed %#v", previewed, executed)
+	}
+	if call.Method != "POST" || call.URL != "/open-apis/base/v3/bases/app_x/tables/tbl_1/forms/vew_1/lottery/actions" {
+		t.Fatalf("dry-run call=%s %s", call.Method, call.URL)
 	}
 }
 
@@ -207,15 +238,47 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 			command:  "+form-notifications-update",
 			args:     []string{"--type", "scheduled", "--enabled=true", "--receivers-json", `[{"open_chat_id":"oc_1"}]`, "--notify-time", "2026-08-25T10:00:00+08:00", "--repeat-type", "day", "--timezone", "Asia/Shanghai"},
 			param:    "--receivers-json",
-			want:     "open_chat_id",
+			want:     "only open_id",
+		},
+		{
+			name:     "notification internal user id",
+			shortcut: BaseFormNotificationsUpdate,
+			command:  "+form-notifications-update",
+			args:     []string{"--type", "on-submission", "--enabled=true", "--receivers-json", `[{"open_id":"ou_1","user_id":"123"}]`},
+			param:    "--receivers-json",
+			want:     "only open_id",
+		},
+		{
+			name:     "notification union id",
+			shortcut: BaseFormNotificationsUpdate,
+			command:  "+form-notifications-update",
+			args:     []string{"--type", "on-submission", "--enabled=true", "--receivers-json", `[{"union_id":"on_1"}]`},
+			param:    "--receivers-json",
+			want:     "open_id",
+		},
+		{
+			name:     "notification email",
+			shortcut: BaseFormNotificationsUpdate,
+			command:  "+form-notifications-update",
+			args:     []string{"--type", "on-submission", "--enabled=true", "--receivers-json", `[{"email":"user@example.com"}]`},
+			param:    "--receivers-json",
+			want:     "open_id",
 		},
 		{
 			name:     "lottery icon token",
 			shortcut: BaseFormLotteryAction,
 			command:  "+form-lottery-action",
-			args:     []string{"--action", "enable", "--lottery-json", `{"icon_token":"img_1","awards":[]}`},
-			param:    "--lottery-json",
+			args:     []string{"--action", "enable", "--config-json", `{"icon_token":"img_1","awards":[]}`},
+			param:    "--config-json",
 			want:     "icon_token",
+		},
+		{
+			name:     "relink awards",
+			shortcut: BaseFormLotteryAction,
+			command:  "+form-lottery-action",
+			args:     []string{"--action", "relink-winning-table", "--config-json", `{"version":2,"awards":[]}`},
+			param:    "--config-json",
+			want:     "awards",
 		},
 	}
 	for _, tt := range tests {

@@ -73,7 +73,7 @@ var BaseFormNotificationsUpdate = common.Shortcut{
 		common.Flag{Name: "type", Desc: "notification type", Required: true, Enum: []string{"on-submission", "scheduled"}},
 		common.Flag{Name: "enabled", Type: "bool", Desc: "enable or disable this notification", Required: true},
 		common.Flag{Name: "locale", Desc: "notification locale"},
-		common.Flag{Name: "receivers-json", Desc: "receiver list JSON array; open_chat_id is not supported", Input: []string{common.File, common.Stdin}},
+		common.Flag{Name: "receivers-json", Desc: "receiver list JSON array; each receiver must contain only open_id", Input: []string{common.File, common.Stdin}},
 		common.Flag{Name: "notify-time", Desc: "scheduled notify time in RFC3339 format"},
 		common.Flag{Name: "repeat-type", Desc: "scheduled repeat type"},
 		common.Flag{Name: "timezone", Desc: "IANA timezone, for example Asia/Shanghai"},
@@ -137,12 +137,12 @@ var BaseFormLotteryAction = common.Shortcut{
 	Scopes:      []string{"base:form:update"},
 	AuthTypes:   authTypes(),
 	Flags: appendFormConfigFlags(
-		common.Flag{Name: "action", Desc: "lottery action", Required: true, Enum: []string{"enable", "disable", "update", "relink_winning_table"}},
-		common.Flag{Name: "lottery-json", Desc: "lottery config JSON object; icon_token is not supported", Input: []string{common.File, common.Stdin}},
+		common.Flag{Name: "action", Desc: "lottery action", Required: true, Enum: []string{"enable", "disable", "update", "relink-winning-table"}},
+		common.Flag{Name: "config-json", Desc: "lottery config JSON object; icon_token is not supported", Input: []string{common.File, common.Stdin}},
 	),
 	Tips: []string{
-		"enable and update require --lottery-json with full lottery settings; update also requires lottery.version.",
-		"Do not pass icon_token in lottery JSON.",
+		"enable and update require --config-json with full lottery settings; update also requires lottery.version.",
+		"relink-winning-table accepts optional --config-json without awards; do not pass icon_token.",
 	},
 	Validate: func(_ context.Context, runtime *common.RuntimeContext) error {
 		_, err := buildFormLotteryActionBody(runtime)
@@ -363,8 +363,8 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 			if err != nil {
 				return nil, err
 			}
-			if containsKey(receivers, "open_chat_id") {
-				return nil, baseFlagErrorf("--receivers-json must not contain open_chat_id")
+			if err := validateNotificationReceivers(receivers); err != nil {
+				return nil, err
 			}
 			if err := validateRFC3339Flag("notify-time", runtime.Str("notify-time")); err != nil {
 				return nil, err
@@ -388,8 +388,8 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 		if err != nil {
 			return nil, err
 		}
-		if containsKey(receivers, "open_chat_id") {
-			return nil, baseFlagErrorf("--receivers-json must not contain open_chat_id")
+		if err := validateNotificationReceivers(receivers); err != nil {
+			return nil, err
 		}
 		group["receivers"] = receivers
 	}
@@ -448,30 +448,61 @@ func buildFormSubmitActionsBody(runtime *common.RuntimeContext) (map[string]inte
 
 func buildFormLotteryActionBody(runtime *common.RuntimeContext) (map[string]interface{}, error) {
 	action := runtime.Str("action")
-	body := map[string]interface{}{"action": action}
+	wireAction := action
+	if action == "relink-winning-table" {
+		wireAction = "relink_winning_table"
+	}
+	body := map[string]interface{}{"action": wireAction}
+	config := runtime.Str("config-json")
 	if action == "enable" || action == "update" {
-		if runtime.Str("lottery-json") == "" {
-			return nil, baseFlagErrorf("--lottery-json is required for %s action", action)
+		if config == "" {
+			return nil, baseFlagErrorf("--config-json is required for %s action", action)
 		}
-		lottery, err := parseJSONObjectFlag("lottery-json", runtime.Str("lottery-json"))
+	}
+	if config != "" {
+		lottery, err := parseJSONObjectFlag("config-json", config)
 		if err != nil {
 			return nil, err
 		}
 		if containsKey(lottery, "icon_token") {
-			return nil, baseFlagErrorf("--lottery-json must not contain icon_token")
+			return nil, baseFlagErrorf("--config-json must not contain icon_token")
+		}
+		if action == "relink-winning-table" && containsKey(lottery, "awards") {
+			return nil, baseFlagErrorf("--config-json must not contain awards for relink-winning-table action")
 		}
 		if action == "update" {
 			if _, ok := lottery["version"]; !ok {
-				return nil, baseFlagErrorf("--lottery-json.version is required for update action")
+				return nil, baseFlagErrorf("--config-json.version is required for update action")
 			}
 		}
 		body["lottery"] = lottery
 		return body, nil
 	}
-	if runtime.Changed("lottery-json") {
-		return nil, baseFlagErrorf("--lottery-json is only accepted for enable or update action")
+	if runtime.Changed("config-json") && action == "disable" {
+		return nil, baseFlagErrorf("--config-json is not accepted for disable action")
 	}
 	return body, nil
+}
+
+func validateNotificationReceivers(receivers []interface{}) error {
+	for _, receiver := range receivers {
+		item, ok := receiver.(map[string]interface{})
+		if !ok {
+			return baseFlagErrorf("--receivers-json items must be objects containing only open_id")
+		}
+		if len(item) != 1 {
+			return baseFlagErrorf("--receivers-json items must contain only open_id")
+		}
+		openIDValue, exists := item["open_id"]
+		if !exists {
+			return baseFlagErrorf("--receivers-json items must contain only open_id")
+		}
+		openID, ok := openIDValue.(string)
+		if !ok || strings.TrimSpace(openID) == "" {
+			return baseFlagErrorf("--receivers-json items must contain a non-empty open_id")
+		}
+	}
+	return nil
 }
 
 func validateRFC3339Flag(name, value string) error {
