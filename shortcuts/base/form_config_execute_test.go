@@ -377,6 +377,14 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 			want:     "awards",
 		},
 		{
+			name:     "relink rejects null awards",
+			shortcut: BaseFormLotteryAction,
+			command:  "+form-lottery-action",
+			args:     []string{"--action", "relink-winning-table", "--config-json", `{"awards":null}`},
+			param:    "--config-json",
+			want:     "awards",
+		},
+		{
 			name:     "disabled submission period rejects dates",
 			shortcut: BaseFormSubmissionSettingsUpdate,
 			command:  "+form-submission-settings-update",

@@ -489,7 +489,7 @@ func buildFormLotteryActionBody(runtime *common.RuntimeContext) (map[string]inte
 		if err != nil {
 			return nil, err
 		}
-		if action == "relink-winning-table" && lottery.Awards != nil {
+		if action == "relink-winning-table" && lottery.AwardsSet {
 			return nil, baseFlagErrorf("--config-json must not contain awards for relink-winning-table action")
 		}
 		if action == "update" {
@@ -526,6 +526,7 @@ type formLotteryPayload struct {
 	AwarderInfo  *formLotteryAwarderPayload      `json:"awarder_info,omitempty"`
 	Awards       *[]formLotteryAwardPayload      `json:"awards,omitempty"`
 	WinningTable *formLotteryWinningTablePayload `json:"winning_table,omitempty"`
+	AwardsSet    bool                            `json:"-"`
 }
 
 type formLotteryAwarderPayload struct {
@@ -554,6 +555,11 @@ func parseFormLotteryPayload(value string) (*formLotteryPayload, error) {
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return nil, baseFlagErrorf("--config-json must contain exactly one JSON object")
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(value), &fields); err != nil {
+		return nil, baseFlagErrorf("--config-json must be a valid lottery JSON object: %v", err)
+	}
+	_, lottery.AwardsSet = fields["awards"]
 	return lottery, nil
 }
 
