@@ -311,15 +311,22 @@ func TestCollectScopesForDomains_NonexistentDomain(t *testing.T) {
 }
 
 func TestLoginHelpersUseInjectedAPICatalog(t *testing.T) {
+	const (
+		serviceName   = "catalog_fixture_domain"
+		serviceTitle  = "Injected Catalog Title"
+		serviceDetail = "Injected Catalog Description"
+		serviceScope  = "catalog:fixture:read"
+	)
 	service := meta.ServiceFromMap(map[string]interface{}{
-		"name":  "drive",
-		"title": "Injected Drive",
+		"name":        serviceName,
+		"title":       serviceTitle,
+		"description": serviceDetail,
 		"resources": map[string]interface{}{
 			"files": map[string]interface{}{"methods": map[string]interface{}{
 				"list": map[string]interface{}{
 					"httpMethod":   "GET",
 					"accessTokens": []interface{}{"user"},
-					"scopes":       []interface{}{"drive:fixture:read"},
+					"scopes":       []interface{}{serviceScope},
 				},
 			}},
 		},
@@ -327,15 +334,16 @@ func TestLoginHelpersUseInjectedAPICatalog(t *testing.T) {
 	catalog := apicatalog.New(apicatalog.SourceEmbedded, []meta.Service{service})
 	resolver := newDomainResolver(catalog, nil)
 
-	if got := resolver.complete("", ""); !slices.Equal(got, []string{"drive"}) {
-		t.Fatalf("completion = %v, want [drive]", got)
+	if got := resolver.complete("", ""); !slices.Equal(got, []string{serviceName}) {
+		t.Fatalf("completion = %v, want [%s]", got, serviceName)
 	}
-	if scopes := resolver.scopesFor([]string{"drive"}, "user", ""); !slices.Contains(scopes, "drive:fixture:read") {
+	if scopes := resolver.scopesFor([]string{serviceName}, "user", ""); !slices.Contains(scopes, serviceScope) {
 		t.Fatalf("scopes %v do not include injected catalog scope", scopes)
 	}
 	metadata := resolver.metadata("en", "")
-	if len(metadata) != 1 || metadata[0].Name != "drive" || metadata[0].Title == "" {
-		t.Fatalf("metadata = %#v, want injected drive metadata", metadata)
+	wantMetadata := []domainMeta{{Name: serviceName, Title: serviceTitle, Description: serviceDetail}}
+	if !slices.Equal(metadata, wantMetadata) {
+		t.Fatalf("metadata = %#v, want %#v", metadata, wantMetadata)
 	}
 }
 
