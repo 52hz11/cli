@@ -99,8 +99,8 @@ func TestFormSubmissionSettingsUpdateBuildsBodies(t *testing.T) {
 		},
 		{
 			name:  "user submit limit",
-			flags: []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "1", "--user-submit-cycle", "day"},
-			want:  map[string]interface{}{"user_submit_limit": map[string]interface{}{"enabled": true, "frequency_limit": float64(1), "frequency_cycle": "day"}},
+			flags: []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "3", "--user-submit-cycle", "day"},
+			want:  map[string]interface{}{"user_submit_limit": map[string]interface{}{"enabled": true, "frequency_limit": float64(3), "frequency_cycle": "day"}},
 		},
 		{
 			name:  "allow modify false",
@@ -289,12 +289,12 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "user submit limit must be one",
+			name:     "user submit limit must be positive",
 			shortcut: BaseFormSubmissionSettingsUpdate,
 			command:  "+form-submission-settings-update",
-			args:     []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "2", "--user-submit-cycle", "day"},
+			args:     []string{"--user-submit-limit-enabled=true", "--user-submit-limit", "0", "--user-submit-cycle", "day"},
 			param:    "--user-submit-limit",
-			want:     "must be 1",
+			want:     "greater than 0",
 		},
 		{
 			name:     "on submission receiver required",
@@ -452,19 +452,14 @@ func TestFormConfigRejectsUnsupportedWriteFields(t *testing.T) {
 	}
 }
 
-func TestFormSubmitActionsRequiresRevision(t *testing.T) {
-	factory, stdout, _ := newExecuteFactory(t)
-	args := []string{
-		"+form-submit-actions-update",
-		"--base-token", "app_x",
-		"--table-id", "tbl_1",
-		"--form-id", "vew_1",
+func TestFormSubmitActionsOmitsOptionalRevision(t *testing.T) {
+	stub := runFormConfigPatch(t, BaseFormSubmitActionsUpdate, "+form-submit-actions-update", "submit-actions",
 		"--type", "redirect",
 		"--enabled=false",
-	}
-	err := runShortcut(t, BaseFormSubmitActionsUpdate, args, factory, stdout)
-	if err == nil || !strings.Contains(err.Error(), `required flag(s) "revision" not set`) {
-		t.Fatalf("expected required revision error, got %v", err)
+	)
+	want := map[string]interface{}{"redirect": map[string]interface{}{"enabled": false}}
+	if got := decodeCapturedJSONBody(t, stub); !reflect.DeepEqual(got, want) {
+		t.Fatalf("request body=%#v, want %#v", got, want)
 	}
 }
 

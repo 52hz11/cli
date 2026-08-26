@@ -39,7 +39,7 @@ var BaseFormSubmissionSettingsUpdate = common.Shortcut{
 		common.Flag{Name: "end-at", Desc: "submission end time in RFC3339 format"},
 		common.Flag{Name: "timezone", Desc: "IANA timezone, for example Asia/Shanghai"},
 		common.Flag{Name: "user-submit-limit-enabled", Type: "bool", Desc: "enable or disable per-user submission limit"},
-		common.Flag{Name: "user-submit-limit", Type: "int", Desc: "maximum submissions per user; currently must be 1"},
+		common.Flag{Name: "user-submit-limit", Type: "int", Desc: "maximum submissions per user; must be greater than 0"},
 		common.Flag{Name: "user-submit-cycle", Desc: "per-user limit cycle", Enum: []string{"total", "day", "week", "month"}},
 		common.Flag{Name: "total-submit-limit-enabled", Type: "bool", Desc: "enable or disable total submission limit"},
 		common.Flag{Name: "total-submit-maximum", Type: "int", Desc: "maximum total submissions"},
@@ -109,7 +109,7 @@ var BaseFormSubmitActionsUpdate = common.Shortcut{
 	Flags: appendFormConfigFlags(
 		common.Flag{Name: "type", Desc: "submit action type", Required: true, Enum: []string{"result-page", "redirect"}},
 		common.Flag{Name: "enabled", Type: "bool", Desc: "enable or disable the action", Required: true},
-		common.Flag{Name: "revision", Type: "int", Desc: "current action revision", Required: true},
+		common.Flag{Name: "revision", Type: "int", Desc: "current action revision; omit to use the latest revision"},
 		common.Flag{Name: "title", Desc: "result page title"},
 		common.Flag{Name: "description-json", Desc: "result page description JSON array", Input: []string{common.File, common.Stdin}},
 		common.Flag{Name: "redirect-url", Desc: "redirect URL after form submit"},
@@ -297,8 +297,8 @@ func buildFormSubmissionSettingsBody(runtime *common.RuntimeContext) (map[string
 		enabled := runtime.Bool("user-submit-limit-enabled")
 		limit := map[string]interface{}{"enabled": enabled}
 		if enabled {
-			if runtime.Int("user-submit-limit") != 1 {
-				return nil, baseFlagErrorf("--user-submit-limit must be 1 when --user-submit-limit-enabled=true")
+			if runtime.Int("user-submit-limit") <= 0 {
+				return nil, baseFlagErrorf("--user-submit-limit must be greater than 0 when --user-submit-limit-enabled=true")
 			}
 			if runtime.Str("user-submit-cycle") == "" {
 				return nil, baseFlagErrorf("--user-submit-cycle is required when --user-submit-limit-enabled=true")
@@ -413,11 +413,11 @@ func buildFormNotificationsBody(runtime *common.RuntimeContext) (map[string]inte
 }
 
 func buildFormSubmitActionsBody(runtime *common.RuntimeContext) (map[string]interface{}, error) {
-	if !runtime.Changed("revision") {
-		return nil, baseFlagErrorf("--revision is required")
-	}
 	enabled := runtime.Bool("enabled")
-	body := map[string]interface{}{"revision": runtime.Int("revision")}
+	body := map[string]interface{}{}
+	if runtime.Changed("revision") {
+		body["revision"] = runtime.Int("revision")
+	}
 	group := map[string]interface{}{"enabled": enabled}
 
 	switch runtime.Str("type") {
