@@ -521,12 +521,11 @@ func formNotificationReceivers(openIDs []string) ([]interface{}, error) {
 }
 
 type formLotteryPayload struct {
-	Version      *int64                          `json:"version,omitempty"`
-	Probability  *int64                          `json:"probability,omitempty"`
-	AwarderInfo  *formLotteryAwarderPayload      `json:"awarder_info,omitempty"`
-	Awards       *[]formLotteryAwardPayload      `json:"awards,omitempty"`
-	WinningTable *formLotteryWinningTablePayload `json:"winning_table,omitempty"`
-	AwardsSet    bool                            `json:"-"`
+	Version     *int64                     `json:"version,omitempty"`
+	Probability *int64                     `json:"probability,omitempty"`
+	AwarderInfo *formLotteryAwarderPayload `json:"awarder_info,omitempty"`
+	Awards      *[]formLotteryAwardPayload `json:"awards,omitempty"`
+	AwardsSet   bool                       `json:"-"`
 }
 
 type formLotteryAwarderPayload struct {
@@ -538,11 +537,6 @@ type formLotteryAwarderPayload struct {
 type formLotteryAwardPayload struct {
 	Name     string `json:"name"`
 	Quantity int64  `json:"quantity"`
-}
-
-type formLotteryWinningTablePayload struct {
-	TableID string `json:"table_id,omitempty"`
-	Status  string `json:"status,omitempty"`
 }
 
 func parseFormLotteryPayload(value string) (*formLotteryPayload, error) {
